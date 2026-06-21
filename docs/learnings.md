@@ -138,3 +138,33 @@ inform an answer but can't change anything).
 - **Takeaway:** for a context-rich one-shot, resume the original session instead of rebuilding
   context; gate autonomy with `--disallowed-tools` / `--permission-mode` and cap cost with
   `--max-budget-usd`. (Don't resume a session that's currently open — appends can clobber.)
+
+## Compute liveness from the filesystem, not just event flags
+When an event (a hook) may fire late or never, derive the state from a cheap source-of-truth check
+instead of trusting a cached flag. We flag "needs scan" by comparing the transcript's `mtime` to
+`last_scanned_at`, so an active conversation surfaces even though the `SessionEnd` hook only fires
+when the session ends.
+- **Why it came up:** a still-open session was never flagged `needs_scan` (SessionEnd hadn't fired),
+  so new work never showed up in the UI.
+- **Takeaway:** prefer recomputing derived state from the underlying artifact (file mtime/size/hash)
+  over relying solely on an event that can be missed or delayed — `fs.stat` is cheap enough per render.
+
+## Headless browser end-to-end checks via Chrome DevTools Protocol (no Playwright)
+Launch `chrome --headless --remote-debugging-port=9222 <url>`, then drive it from Node with the
+built-in global `WebSocket` (get the page target from `http://localhost:9222/json`): `Runtime.evaluate`
+to inspect/act, `Input.dispatchMouseEvent` to click, `Page.captureScreenshot` for proof. Gotcha: a
+programmatic `element.click()` may not trigger React handlers on a dnd-kit draggable, but a real
+`Input.dispatchMouseEvent` (press+release at coordinates) does.
+- **Why it came up:** the preview server and the Chrome extension were unavailable, but I needed to
+  *prove* the Scan button updated the board in place — measured 4→3 cards with `navigations:1` (no reload).
+- **Takeaway:** CDP + Node's global `WebSocket` is a zero-dependency way to script a real browser for
+  verification; click via `Input.dispatchMouseEvent`, not `.click()`, when synthetic events get swallowed.
+
+## HMR prop-drift in long-lived dev tabs
+During heavy live-editing, a browser tab can end up running a client bundle that expects props an
+older cached server payload never sent → a runtime crash (e.g. `Cannot read properties of undefined
+(reading 'length')`) that silently breaks interactivity until a hard reload.
+- **Why it came up:** after ~a dozen edits to one component, the open tab threw on
+  `conversationIds.length` and the Scan button stopped updating in place.
+- **Takeaway:** default array/object props (`x = []`) so a transient prop-shape mismatch can't
+  hard-crash; when "it only works after a hard refresh," suspect bundle drift, not your logic.
