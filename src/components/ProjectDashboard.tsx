@@ -29,15 +29,15 @@ async function patch(id: number, body: Record<string, unknown>) {
 }
 
 export default function ProjectDashboard({
-  initialItems,
+  initialItems = [],
   projectId,
-  conversationIds,
-  pendingConversationIds,
+  conversationIds = [],
+  pendingConversationIds = [],
 }: {
-  initialItems: ItemWithSource[];
+  initialItems?: ItemWithSource[];
   projectId: number;
-  conversationIds: number[];
-  pendingConversationIds: number[];
+  conversationIds?: number[];
+  pendingConversationIds?: number[];
 }) {
   const [items, setItems] = useState<ItemWithSource[]>(initialItems);
   const [active, setActive] = useState<ItemKind>("task");
