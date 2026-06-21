@@ -125,3 +125,16 @@ only path, a missing marker silently processes **nothing**.
   the whole file → a scan that extracted zero items.
 - **Takeaway:** always handle "marker not found" explicitly — fall back to processing everything
   (idempotent dedup downstream makes the re-process safe).
+
+## Resume a Claude Code session for context; restrict tools to bound side effects
+`claude -p --resume <session-id> "…"` continues an *existing* conversation, so the model already
+has all the prior context — no need to re-explain. Pair it with `--disallowed-tools "Write Edit
+MultiEdit NotebookEdit Bash"` to make the run effectively **read-only** (it can Read/Grep/Glob to
+inform an answer but can't change anything).
+- **Why it came up:** the dashboard's "Implement" button drafts a plan by resuming the task's
+  source conversation — the plan came back referencing the exact prior discussion (`eas
+  channel:edit …`), which a fresh run wouldn't know; disallowing edit/shell tools guaranteed it
+  only *planned*.
+- **Takeaway:** for a context-rich one-shot, resume the original session instead of rebuilding
+  context; gate autonomy with `--disallowed-tools` / `--permission-mode` and cap cost with
+  `--max-budget-usd`. (Don't resume a session that's currently open — appends can clobber.)
