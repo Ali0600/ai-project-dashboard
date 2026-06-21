@@ -1,5 +1,7 @@
 # AI Project Dashboard
 
+[![CI](https://github.com/Ali0600/ai-project-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Ali0600/ai-project-dashboard/actions/workflows/ci.yml)
+
 Turn your Claude Code conversations into a visual project workspace. The dashboard scans
 your local conversation transcripts and surfaces, per project, a **Kanban task board** plus
 **Recommendations**, **Next Steps**, and **Learnings** — so the suggestions and to‑dos that
