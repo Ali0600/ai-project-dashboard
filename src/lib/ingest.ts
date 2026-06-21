@@ -5,6 +5,7 @@ import type { ExtractionResult } from "./types";
 export interface IngestResult {
   created: number;
   flaggedDone: number;
+  createdIds: number[];
 }
 
 /**
@@ -20,10 +21,13 @@ export function ingestExtraction(opts: {
   const { projectId, conversationId = null, extraction } = opts;
 
   return getDb().transaction((): IngestResult => {
-    let created = 0;
+    const createdIds: number[] = [];
+    const add = (id: number | null) => {
+      if (id != null) createdIds.push(id);
+    };
 
     for (const t of extraction.tasks) {
-      if (
+      add(
         insertItem({
           projectId,
           conversationId,
@@ -33,9 +37,8 @@ export function ingestExtraction(opts: {
           status: t.status_guess,
           priority: t.priority,
           sourceQuote: t.source_quote,
-        })
-      )
-        created++;
+        }),
+      );
     }
 
     const simple = [
@@ -45,7 +48,7 @@ export function ingestExtraction(opts: {
     ] as const;
     for (const [kind, arr] of simple) {
       for (const it of arr) {
-        if (
+        add(
           insertItem({
             projectId,
             conversationId,
@@ -53,9 +56,8 @@ export function ingestExtraction(opts: {
             title: it.title,
             detail: it.detail,
             sourceQuote: it.source_quote,
-          })
-        )
-          created++;
+          }),
+        );
       }
     }
 
@@ -64,6 +66,6 @@ export function ingestExtraction(opts: {
       if (flagSuggestedDone(projectId, c.existing_id_or_title, c.evidence_quote)) flaggedDone++;
     }
 
-    return { created, flaggedDone };
+    return { created: createdIds.length, flaggedDone, createdIds };
   })();
 }

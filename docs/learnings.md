@@ -96,3 +96,14 @@ the dev server's counter advances across requests while the client starts fresh,
 - **Takeaway:** feed such libraries a hydration-stable id from React's `useId()` (e.g.
   `<DndContext id={useId()}>`). `useId` is guaranteed identical on server and client. Same fix
   applies to any "random/counter id, date, or `window` check" hydration warning.
+
+## `useState(props)` ignores prop changes (and why `router.refresh()` "did nothing")
+`const [x, setX] = useState(props.x)` seeds state **once**, on mount; later prop changes are
+ignored. So a child seeded from props won't update when the parent re-renders with new data.
+`router.refresh()` re-runs the server component and passes fresh props, but a child holding its own
+`useState(props)` keeps the stale copy — only a full reload (remount) reflects the change.
+- **Why it came up:** the Scan button extracted items, but the Kanban only showed them after a
+  hard refresh — `KanbanBoard`/`ItemList` each did `useState(tasks)`.
+- **Takeaway:** pick one source of truth. Make children **controlled** (render straight from
+  props + callbacks) and keep mutable state in one owner; after a server-side change, update that
+  owner explicitly (we refetch via an API and `setItems`), rather than relying on prop-sync.

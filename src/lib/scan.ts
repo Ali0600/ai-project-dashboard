@@ -17,6 +17,7 @@ export interface ScanResult {
   conversationId: number;
   created: number;
   flaggedDone: number;
+  createdIds: number[];
   chunks: number;
   skipped: boolean;
 }
@@ -43,14 +44,14 @@ export async function scanTranscript(
   // No cwd means this isn't a real interactive project conversation (e.g. a headless
   // `claude -p` artifact). Skip it rather than inventing a junk project.
   if (!meta.cwd) {
-    return { conversationId: 0, created: 0, flaggedDone: 0, chunks: 0, skipped: true };
+    return { conversationId: 0, created: 0, flaggedDone: 0, createdIds: [], chunks: 0, skipped: true };
   }
 
   const conv = upsertConversation(meta);
 
   if (empty) {
     markConversationScanned(conv.id, lastUuid);
-    return { conversationId: conv.id, created: 0, flaggedDone: 0, chunks: 0, skipped: true };
+    return { conversationId: conv.id, created: 0, flaggedDone: 0, createdIds: [], chunks: 0, skipped: true };
   }
 
   let chunks = chunkText(text);

@@ -5,6 +5,7 @@ import type {
   ItemKind,
   ItemRow,
   ItemStatus,
+  ItemWithSource,
   Priority,
   ProjectRow,
 } from "./types";
@@ -149,6 +150,24 @@ export function listItems(projectId: number, kind?: ItemKind): ItemRow[] {
     .all(projectId) as ItemRow[];
 }
 
+/** Items joined with their source conversation (title + when). */
+export function listItemsWithSource(projectId: number, kind?: ItemKind): ItemWithSource[] {
+  const db = getDb();
+  const base = `
+    SELECT i.*, c.title AS conversation_title, c.started_at AS conversation_at
+    FROM items i
+    LEFT JOIN conversations c ON c.id = i.conversation_id
+    WHERE i.project_id = ?`;
+  if (kind) {
+    return db
+      .prepare(`${base} AND i.kind = ? ORDER BY i.priority ASC, i.id DESC`)
+      .all(projectId, kind) as ItemWithSource[];
+  }
+  return db
+    .prepare(`${base} ORDER BY i.priority ASC, i.id DESC`)
+    .all(projectId) as ItemWithSource[];
+}
+
 /** Open tasks (id + title) for a project — used by the re-prioritization pass. */
 export function openTasks(projectId: number): { id: number; title: string }[] {
   return getDb()
@@ -180,8 +199,8 @@ export interface InsertItemArgs {
   sourceQuote?: string;
 }
 
-/** Insert an item; returns true if a new row was created (false = duplicate/tombstoned). */
-export function insertItem(a: InsertItemArgs): boolean {
+/** Insert an item; returns the new row id, or null if it was a duplicate/tombstone. */
+export function insertItem(a: InsertItemArgs): number | null {
   const info = getDb()
     .prepare(
       `INSERT INTO items
@@ -200,7 +219,7 @@ export function insertItem(a: InsertItemArgs): boolean {
       source_quote: a.sourceQuote ?? "",
       norm_key: normalizeTitle(a.title),
     });
-  return info.changes > 0;
+  return info.changes > 0 ? Number(info.lastInsertRowid) : null;
 }
 
 export function updateItemStatus(id: number, status: ItemStatus): void {

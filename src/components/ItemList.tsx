@@ -1,31 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import type { ItemRow } from "@/lib/types";
-
-async function patchItem(id: number, body: Record<string, unknown>) {
-  await fetch(`/api/items/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
+import type { ItemStatus, ItemWithSource } from "@/lib/types";
+import SourceLine from "./SourceLine";
 
 /** Generic list for recommendations / next steps / learnings. */
 export default function ItemList({
   items,
   emptyLabel,
+  recentlyAdded,
+  onSetStatus,
+  onOpenDetail,
 }: {
-  items: ItemRow[];
+  items: ItemWithSource[];
   emptyLabel: string;
+  recentlyAdded: Set<number>;
+  onSetStatus: (id: number, status: ItemStatus) => void;
+  onOpenDetail: (id: number) => void;
 }) {
-  const [list, setList] = useState<ItemRow[]>(items);
-  const visible = list.filter((i) => i.status !== "dismissed");
-
-  function setStatus(id: number, status: ItemRow["status"]) {
-    setList((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)));
-    patchItem(id, { status });
-  }
+  const visible = items.filter((i) => i.status !== "dismissed");
 
   if (visible.length === 0) {
     return (
@@ -39,14 +31,23 @@ export default function ItemList({
     <ul className="flex flex-col gap-2">
       {visible.map((item) => {
         const done = item.status === "done";
+        const isNew = recentlyAdded.has(item.id);
         return (
           <li
             key={item.id}
-            className="flex items-start gap-3 rounded-lg border border-black/10 bg-white p-3 dark:border-white/10 dark:bg-zinc-800"
+            onClick={() => onOpenDetail(item.id)}
+            className={`flex cursor-pointer items-start gap-3 rounded-lg border bg-white p-3 dark:bg-zinc-800 ${
+              isNew
+                ? "border-emerald-400 ring-1 ring-emerald-400/40 dark:border-emerald-500"
+                : "border-black/10 dark:border-white/10"
+            }`}
           >
             <button
               title={done ? "Mark as not done" : "Mark as done"}
-              onClick={() => setStatus(item.id, done ? "todo" : "done")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetStatus(item.id, done ? "todo" : "done");
+              }}
               className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-xs ${
                 done
                   ? "border-emerald-600 bg-emerald-600 text-white"
@@ -56,25 +57,31 @@ export default function ItemList({
               ✓
             </button>
             <div className="min-w-0 flex-1">
-              <p
-                className={`text-sm font-medium leading-snug ${
-                  done ? "text-zinc-400 line-through dark:text-zinc-500" : ""
-                }`}
-              >
-                {item.title}
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <p
+                  className={`text-sm font-medium leading-snug ${
+                    done ? "text-zinc-400 line-through dark:text-zinc-500" : ""
+                  }`}
+                >
+                  {item.title}
+                </p>
+                {isNew && (
+                  <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                    New
+                  </span>
+                )}
+              </div>
               {item.detail && (
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{item.detail}</p>
               )}
-              {item.source_quote && (
-                <p className="mt-1.5 border-l-2 border-zinc-300 pl-2 text-[11px] italic text-zinc-400 dark:border-zinc-600">
-                  “{item.source_quote}”
-                </p>
-              )}
+              <SourceLine item={item} />
             </div>
             <button
               title="Dismiss"
-              onClick={() => setStatus(item.id, "dismissed")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetStatus(item.id, "dismissed");
+              }}
               className="shrink-0 rounded px-1.5 text-zinc-400 hover:bg-black/5 hover:text-zinc-600 dark:hover:bg-white/10"
             >
               ✕

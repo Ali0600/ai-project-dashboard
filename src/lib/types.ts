@@ -89,3 +89,9 @@ export interface ItemRow {
   created_at: string;
   updated_at: string;
 }
+
+/** An item joined with its source conversation (title + when), for the UI. */
+export interface ItemWithSource extends ItemRow {
+  conversation_title: string | null;
+  conversation_at: string | null;
+}
