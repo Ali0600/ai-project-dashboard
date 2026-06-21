@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { getDb } from "./db";
 import { PRIORITY_RANK } from "./types";
 import type {
@@ -53,7 +54,7 @@ export interface ProjectSummary extends ProjectRow {
 
 export function listProjects(): ProjectSummary[] {
   const db = getDb();
-  return db
+  const rows = db
     .prepare(
       `SELECT p.*,
         (SELECT COUNT(*) FROM items i
@@ -61,14 +62,30 @@ export function listProjects(): ProjectSummary[] {
              AND i.status IN ('todo','in_progress')) AS open_tasks,
         (SELECT COUNT(*) FROM items i
            WHERE i.project_id = p.id AND i.status != 'dismissed') AS total_items,
-        (SELECT COUNT(*) FROM conversations c
-           WHERE c.project_id = p.id AND c.scan_status = 'needs_scan') AS needs_scan,
         (SELECT MAX(c.last_activity_at) FROM conversations c
            WHERE c.project_id = p.id) AS last_activity_at
        FROM projects p
        ORDER BY last_activity_at DESC NULLS LAST, p.id DESC`,
     )
-    .all() as ProjectSummary[];
+    .all() as Omit<ProjectSummary, "needs_scan">[];
+  // Compute needs_scan live (transcript newer than last scan), not just the stored flag.
+  return rows.map((p) => ({
+    ...p,
+    needs_scan: listConversations(p.id).filter(hasUnscannedActivity).length,
+  }));
+}
+
+/** True if the transcript has activity newer than our last scan (live "needs scan"). */
+export function hasUnscannedActivity(conv: ConversationRow): boolean {
+  if (conv.scan_status === "needs_scan") return true;
+  if (!conv.last_scanned_at) return true;
+  try {
+    const mtimeMs = fs.statSync(conv.transcript_path).mtimeMs;
+    const scannedMs = new Date(conv.last_scanned_at.replace(" ", "T") + "Z").getTime();
+    return mtimeMs > scannedMs + 2000; // 2s grace so a just-scanned convo doesn't flap
+  } catch {
+    return false;
+  }
 }
 
 export function getProject(id: number): ProjectRow | undefined {

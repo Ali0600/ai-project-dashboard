@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ProjectDashboard from "@/components/ProjectDashboard";
-import { getProject, listConversations, listItemsWithSource } from "@/lib/store";
+import { getProject, hasUnscannedActivity, listConversations, listItemsWithSource } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +12,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   const items = listItemsWithSource(project.id);
   const conversations = listConversations(project.id);
-  const pendingIds = conversations
-    .filter((c) => c.scan_status === "needs_scan")
-    .map((c) => c.id);
+  const pendingIds = conversations.filter(hasUnscannedActivity).map((c) => c.id);
 
   return (
     <div>
