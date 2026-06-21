@@ -31,10 +31,12 @@ async function patch(id: number, body: Record<string, unknown>) {
 export default function ProjectDashboard({
   initialItems,
   projectId,
+  conversationIds,
   pendingConversationIds,
 }: {
   initialItems: ItemWithSource[];
   projectId: number;
+  conversationIds: number[];
   pendingConversationIds: number[];
 }) {
   const [items, setItems] = useState<ItemWithSource[]>(initialItems);
@@ -68,17 +70,17 @@ export default function ProjectDashboard({
     return data;
   }
 
-  async function runScan() {
-    if (pending.length === 0 || busy) return;
+  async function runScan(ids: number[]) {
+    if (ids.length === 0 || busy) return;
     setBusy(true);
     setSummary(null);
     const newIds: number[] = [];
     let flagged = 0;
     let error = "";
-    for (let i = 0; i < pending.length; i++) {
-      setSummary(`Scanning ${i + 1}/${pending.length}…`);
+    for (let i = 0; i < ids.length; i++) {
+      setSummary(`Scanning ${i + 1}/${ids.length}…`);
       try {
-        const res = await fetch(`/api/conversations/${pending[i]}/scan`, { method: "POST" });
+        const res = await fetch(`/api/conversations/${ids[i]}/scan`, { method: "POST" });
         const json = await res.json();
         if (!res.ok) error = json.error || "scan failed";
         else {
@@ -116,20 +118,29 @@ export default function ProjectDashboard({
   return (
     <div>
       {/* Toolbar: scan control */}
-      {(pending.length > 0 || (summary && !busy)) && (
+      {(conversationIds.length > 0 || (summary && !busy)) && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-zinc-500">
             {pending.length > 0
               ? `${pending.length} conversation${pending.length > 1 ? "s" : ""} need scanning`
               : "All conversations scanned"}
           </div>
-          {pending.length > 0 && (
+          {conversationIds.length > 0 && (
             <button
-              onClick={runScan}
+              onClick={() => runScan(pending.length > 0 ? pending : conversationIds)}
               disabled={busy}
+              title={
+                pending.length > 0
+                  ? "Extract items from conversations with new activity"
+                  : "Re-scan all conversations for any new items"
+              }
               className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
             >
-              {busy ? summary || "Scanning…" : `Scan ${pending.length} pending`}
+              {busy
+                ? summary || "Scanning…"
+                : pending.length > 0
+                  ? `Scan ${pending.length} pending`
+                  : "Rescan"}
             </button>
           )}
         </div>

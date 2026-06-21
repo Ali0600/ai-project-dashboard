@@ -32,6 +32,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       <ProjectDashboard
         initialItems={items}
         projectId={project.id}
+        conversationIds={conversations.map((c) => c.id)}
         pendingConversationIds={pendingIds}
       />
     </div>
