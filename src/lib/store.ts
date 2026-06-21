@@ -234,6 +234,34 @@ export function updateItemPriority(id: number, priority: Priority): void {
     .run(PRIORITY_RANK[priority], id);
 }
 
+export interface ItemContext {
+  item: ItemRow;
+  projectCwd: string;
+  sessionId: string | null;
+}
+
+/** Item plus its project cwd and source conversation session id (for implement runs). */
+export function getItemContext(id: number): ItemContext | undefined {
+  const row = getDb()
+    .prepare(
+      `SELECT i.*, p.cwd AS project_cwd, c.session_id AS session_id
+         FROM items i
+         JOIN projects p ON p.id = i.project_id
+         LEFT JOIN conversations c ON c.id = i.conversation_id
+        WHERE i.id = ?`,
+    )
+    .get(id) as (ItemRow & { project_cwd: string; session_id: string | null }) | undefined;
+  if (!row) return undefined;
+  const { project_cwd, session_id, ...item } = row;
+  return { item: item as ItemRow, projectCwd: project_cwd, sessionId: session_id };
+}
+
+export function saveImplementationPlan(id: number, plan: string): void {
+  getDb()
+    .prepare("UPDATE items SET implementation_plan = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(plan, id);
+}
+
 /** Flag an open item as "looks done" with supporting evidence. */
 export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence: string): boolean {
   const db = getDb();

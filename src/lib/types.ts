@@ -85,6 +85,7 @@ export interface ItemRow {
   done_evidence: string | null;
   source_uuid: string | null;
   source_quote: string | null;
+  implementation_plan: string | null;
   norm_key: string;
   created_at: string;
   updated_at: string;

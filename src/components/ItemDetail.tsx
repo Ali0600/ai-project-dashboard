@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { formatDate } from "@/lib/format";
 import type { ItemStatus, ItemWithSource } from "@/lib/types";
 import PriorityPill from "./PriorityPill";
@@ -25,6 +25,7 @@ export default function ItemDetail({
   onConfirm,
   onDismissSuggestion,
   onPriorityChange,
+  onImplement,
 }: {
   item: ItemWithSource | null;
   onClose: () => void;
@@ -32,7 +33,11 @@ export default function ItemDetail({
   onConfirm: (id: number) => void;
   onDismissSuggestion: (id: number) => void;
   onPriorityChange: (id: number, rank: number) => void;
+  onImplement: (id: number) => Promise<void>;
 }) {
+  const [implBusy, setImplBusy] = useState(false);
+  const [implError, setImplError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!item) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -43,6 +48,18 @@ export default function ItemDetail({
   if (!item) return null;
 
   const isTask = item.kind === "task";
+
+  async function runImplement() {
+    setImplBusy(true);
+    setImplError(null);
+    try {
+      await onImplement(item!.id);
+    } catch (e) {
+      setImplError((e as Error).message);
+    } finally {
+      setImplBusy(false);
+    }
+  }
 
   return (
     <div
@@ -128,6 +145,38 @@ export default function ItemDetail({
             Captured {formatDate(item.created_at)}
           </p>
         </div>
+
+        {/* Implementation plan (tasks only) */}
+        {isTask && (
+          <div className="mt-4 border-t border-black/10 pt-3 dark:border-white/10">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Implementation plan
+              </p>
+              <button
+                onClick={runImplement}
+                disabled={implBusy}
+                title="Resume the source conversation and draft a plan (read-only — applies nothing)"
+                className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {implBusy ? "Drafting…" : item.implementation_plan ? "Re-draft" : "▶ Implement"}
+              </button>
+            </div>
+            {implBusy && (
+              <p className="mt-2 text-xs text-zinc-500">
+                Resuming the source conversation and drafting a plan… this can take a minute.
+              </p>
+            )}
+            {implError && (
+              <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{implError}</p>
+            )}
+            {item.implementation_plan && (
+              <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md bg-black/5 p-3 text-xs leading-relaxed text-zinc-700 dark:bg-white/5 dark:text-zinc-300">
+                {item.implementation_plan}
+              </pre>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="mt-4 flex flex-wrap items-center gap-2">

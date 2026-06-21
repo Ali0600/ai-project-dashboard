@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS items (
   done_evidence   TEXT,
   source_uuid     TEXT,
   source_quote    TEXT,
+  implementation_plan TEXT,
   norm_key        TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -81,9 +82,13 @@ export function getDb(): Database.Database {
 
 /** Lightweight, idempotent column migrations for DBs created before a column existed. */
 function migrate(db: Database.Database): void {
-  const cols = db.prepare("PRAGMA table_info(items)").all() as { name: string }[];
-  if (!cols.some((c) => c.name === "priority")) {
-    // 3 = medium (matches PRIORITY_RANK and the SCHEMA default).
-    db.exec("ALTER TABLE items ADD COLUMN priority INTEGER NOT NULL DEFAULT 3");
-  }
+  const cols = (db.prepare("PRAGMA table_info(items)").all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  const ensure = (name: string, ddl: string) => {
+    if (!cols.includes(name)) db.exec(`ALTER TABLE items ADD COLUMN ${ddl}`);
+  };
+  // 3 = medium (matches PRIORITY_RANK and the SCHEMA default).
+  ensure("priority", "priority INTEGER NOT NULL DEFAULT 3");
+  ensure("implementation_plan", "implementation_plan TEXT");
 }

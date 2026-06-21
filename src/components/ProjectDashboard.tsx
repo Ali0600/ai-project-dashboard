@@ -63,6 +63,16 @@ export default function ProjectDashboard({
   const setPriority = (id: number, rank: number) =>
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, priority: rank } : i)));
 
+  // Draft an implementation plan (read-only headless run); persists + shows in the modal.
+  async function implement(id: number): Promise<void> {
+    const res = await fetch(`/api/items/${id}/implement`, { method: "POST" });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Implement failed");
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, implementation_plan: json.plan } : i)),
+    );
+  }
+
   async function refetch(): Promise<ItemWithSource[]> {
     const res = await fetch(`/api/projects/${projectId}/items`);
     const data: ItemWithSource[] = res.ok ? await res.json() : items;
@@ -214,12 +224,14 @@ export default function ProjectDashboard({
       )}
 
       <ItemDetail
+        key={selected?.id ?? "none"}
         item={selected}
         onClose={() => setSelectedId(null)}
         onSetStatus={setStatus}
         onConfirm={confirmDone}
         onDismissSuggestion={dismissSuggestion}
         onPriorityChange={setPriority}
+        onImplement={implement}
       />
     </div>
   );
