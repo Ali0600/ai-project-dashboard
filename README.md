@@ -13,6 +13,8 @@ normally scroll away in chat don't get lost.
 - **Completion tracking** — re-scans flag tasks that look finished ("Looks done?") for you to
   confirm; you can also drag cards across the board.
 
+![AI Project Dashboard — per-project Kanban board with AI-assigned priorities](docs/screenshot.png)
+
 ## Highlights
 
 - Built an **event-driven capture pipeline** using Claude Code **hooks** to flag conversation
