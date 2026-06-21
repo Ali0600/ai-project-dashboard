@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatDate } from "@/lib/format";
 import type { ItemStatus, ItemWithSource } from "@/lib/types";
+import CopyButton from "./CopyButton";
 import PriorityPill from "./PriorityPill";
 
 const KIND_LABEL: Record<string, string> = {
@@ -92,7 +93,14 @@ export default function ItemDetail({
           </button>
         </div>
 
-        <h2 className="mt-3 text-lg font-semibold leading-snug">{item.title}</h2>
+        <div className="mt-3 flex items-start justify-between gap-3">
+          <h2 className="text-lg font-semibold leading-snug">{item.title}</h2>
+          <CopyButton
+            text={item.detail ? `${item.title}\n\n${item.detail}` : item.title}
+            label="Copy"
+            className="mt-0.5 shrink-0"
+          />
+        </div>
 
         {item.detail && (
           <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-300">
@@ -153,14 +161,19 @@ export default function ItemDetail({
               <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                 Implementation plan
               </p>
-              <button
-                onClick={runImplement}
-                disabled={implBusy}
-                title="Resume the source conversation and draft a plan (read-only — applies nothing)"
-                className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-              >
-                {implBusy ? "Drafting…" : item.implementation_plan ? "Re-draft" : "▶ Implement"}
-              </button>
+              <div className="flex items-center gap-2">
+                {item.implementation_plan && (
+                  <CopyButton text={item.implementation_plan} label="Copy plan" />
+                )}
+                <button
+                  onClick={runImplement}
+                  disabled={implBusy}
+                  title="Resume the source conversation and draft a plan (read-only — applies nothing)"
+                  className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {implBusy ? "Drafting…" : item.implementation_plan ? "Re-draft" : "▶ Implement"}
+                </button>
+              </div>
             </div>
             {implBusy && (
               <p className="mt-2 text-xs text-zinc-500">
