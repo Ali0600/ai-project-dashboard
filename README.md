@@ -10,10 +10,12 @@ normally scroll away in chat don't get lost.
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash
   command uses your current session; backfill and the dashboard's "Scan" button use headless
   Claude Code (`claude -p`), reusing your existing login.
-- **Automatic capture** — a `SessionEnd` hook flags each conversation as `needs_scan`; you run
-  the LLM extraction on demand from the UI or with `/sync-board`.
+- **Automatic capture** — a `SessionEnd` hook plus live transcript-mtime detection surface
+  conversations with unscanned activity; run the LLM extraction on demand from the UI or `/sync-board`.
 - **Completion tracking** — re-scans flag tasks that look finished ("Looks done?") for you to
   confirm; you can also drag cards across the board.
+- **Act on tasks** — set Urgent/High/Medium/Low priority, add tasks manually, open a card for a
+  detail view, and hit **Implement** to draft a plan (read-only) by resuming the task's source chat.
 
 ![AI Project Dashboard — per-project Kanban board with AI-assigned priorities](docs/screenshot.png)
 
@@ -33,6 +35,10 @@ normally scroll away in chat don't get lost.
   SQLite volume.
 - **AI-triaged priorities** — tasks are auto-assigned Urgent/High/Medium/Low and the board sorts
   highest-first; shipped behind a guarded, idempotent SQLite column migration over a live DB.
+- **Agentic "Implement"** — drafts an implementation plan by resuming a task's *source* conversation
+  (`claude -p --resume`) read-only (edit/shell tools disabled), so the plan has full context.
+- **Tested & CI-gated** — Vitest unit tests for the streaming transcript parser; GitHub Actions runs
+  typecheck · lint · test · build on every push.
 
 ## How it works
 
@@ -80,6 +86,7 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | Script | Purpose |
 | --- | --- |
 | `npm run dev` / `build` / `start` | Next.js dev / production build / serve |
+| `npm test` | Run the Vitest suite (transcript parser tests) |
 | `npm run backfill` | Scan existing transcripts via headless Claude |
 | `npm run prioritize` | AI-assign priority (Urgent/High/Medium/Low) to existing tasks |
 | `npm run ingest` | Ingest an extraction JSON (used by `/sync-board`) |
@@ -92,8 +99,11 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | --- | --- | --- |
 | `DASHBOARD_DB` | `./data/dashboard.db` | SQLite file location |
 | `CLAUDE_EXTRACT_MODEL` | `haiku` | Model alias for headless extraction |
-| `CLAUDE_MAX_BUDGET_USD` | `0.25` | Per-call spend cap for `claude -p` |
-| `SCAN_MAX_CHUNKS` | `12` | Max chunks per conversation scan (bounds cost) |
+| `CLAUDE_MAX_BUDGET_USD` | `0.25` | Per-call spend cap for extraction `claude -p` |
+| `CLAUDE_IMPLEMENT_MODEL` | `sonnet` | Model for the "Implement" plan run |
+| `CLAUDE_IMPLEMENT_BUDGET_USD` | `0.50` | Per-call spend cap for "Implement" |
+| `CHUNK_CHARS` | `120000` | Max characters per extraction chunk |
+| `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 
 ## Docker
 
@@ -108,4 +118,4 @@ docker run -p 3000:3000 -v "$PWD/data:/app/data" ai-project-dashboard
 ## Tech stack
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · SQLite (better-sqlite3) ·
-dnd-kit · zod · Claude Code (headless `claude -p`).
+dnd-kit · zod · Vitest · GitHub Actions CI · Claude Code (headless `claude -p`).
