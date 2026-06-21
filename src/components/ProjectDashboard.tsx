@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import AddTaskForm from "./AddTaskForm";
 import ItemDetail from "./ItemDetail";
 import ItemList from "./ItemList";
 import KanbanBoard from "./KanbanBoard";
@@ -46,6 +47,7 @@ export default function ProjectDashboard({
   const [pending, setPending] = useState<number[]>(pendingConversationIds);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   /* --- mutations: optimistic local update + persist --- */
   function update(id: number, local: Partial<ItemWithSource>, body: Record<string, unknown>) {
@@ -71,6 +73,12 @@ export default function ProjectDashboard({
     setItems((prev) =>
       prev.map((i) => (i.id === id ? { ...i, implementation_plan: json.plan } : i)),
     );
+  }
+
+  function handleCreated(item: ItemWithSource) {
+    setItems((prev) => [item, ...prev]);
+    setRecentlyAdded((prev) => new Set(prev).add(item.id));
+    setShowAddForm(false);
   }
 
   async function refetch(): Promise<ItemWithSource[]> {
@@ -204,15 +212,33 @@ export default function ProjectDashboard({
 
       {/* Content */}
       {active === "task" ? (
-        <KanbanBoard
-          tasks={items.filter((i) => i.kind === "task")}
-          recentlyAdded={recentlyAdded}
-          onMove={moveTask}
-          onConfirm={confirmDone}
-          onDismissSuggestion={dismissSuggestion}
-          onPriorityChange={setPriority}
-          onOpenDetail={setSelectedId}
-        />
+        <div>
+          {showAddForm ? (
+            <AddTaskForm
+              projectId={projectId}
+              onCreated={handleCreated}
+              onCancel={() => setShowAddForm(false)}
+            />
+          ) : (
+            <div className="mb-3 flex justify-end">
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:border-white/15 dark:text-zinc-200 dark:hover:bg-white/10"
+              >
+                ＋ Add task
+              </button>
+            </div>
+          )}
+          <KanbanBoard
+            tasks={items.filter((i) => i.kind === "task")}
+            recentlyAdded={recentlyAdded}
+            onMove={moveTask}
+            onConfirm={confirmDone}
+            onDismissSuggestion={dismissSuggestion}
+            onPriorityChange={setPriority}
+            onOpenDetail={setSelectedId}
+          />
+        </div>
       ) : (
         <ItemList
           items={items.filter((i) => i.kind === active)}
