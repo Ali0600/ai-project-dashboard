@@ -10,8 +10,16 @@ import {
 import { chunkText, readTranscript } from "./transcripts";
 import type { ExtractionResult } from "./types";
 
-/** Cap per-scan headless calls to bound cost; keep the most recent chunks. */
-const MAX_CHUNKS = Number(process.env.SCAN_MAX_CHUNKS || 12);
+/** Cap per-scan headless calls to bound cost. */
+const MAX_CHUNKS = Number(process.env.SCAN_MAX_CHUNKS || 16);
+const CHUNK_CHARS = Number(process.env.CHUNK_CHARS || 120000);
+
+/** Over the cap, keep the first few + the most recent chunks (don't silently drop the middle). */
+function selectChunks(chunks: string[], max: number): string[] {
+  if (chunks.length <= max) return chunks;
+  const head = Math.min(3, max - 1);
+  return [...chunks.slice(0, head), ...chunks.slice(chunks.length - (max - head))];
+}
 
 export interface ScanResult {
   conversationId: number;
@@ -39,7 +47,7 @@ export async function scanTranscript(
   const existing = getConversationBySession(sessionIdFromPath(transcriptPath));
   const since = incremental ? existing?.last_scanned_uuid ?? null : null;
 
-  const { meta, text, lastUuid, empty } = readTranscript(transcriptPath, since);
+  const { meta, text, lastUuid, empty } = await readTranscript(transcriptPath, since);
 
   // No cwd means this isn't a real interactive project conversation (e.g. a headless
   // `claude -p` artifact). Skip it rather than inventing a junk project.
@@ -54,8 +62,7 @@ export async function scanTranscript(
     return { conversationId: conv.id, created: 0, flaggedDone: 0, createdIds: [], chunks: 0, skipped: true };
   }
 
-  let chunks = chunkText(text);
-  if (chunks.length > MAX_CHUNKS) chunks = chunks.slice(-MAX_CHUNKS); // keep most recent
+  const chunks = selectChunks(chunkText(text, CHUNK_CHARS), MAX_CHUNKS);
 
   const existingTitles = openItemTitles(conv.project_id);
   const parts: ExtractionResult[] = [];

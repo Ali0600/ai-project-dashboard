@@ -107,3 +107,21 @@ ignored. So a child seeded from props won't update when the parent re-renders wi
 - **Takeaway:** pick one source of truth. Make children **controlled** (render straight from
   props + callbacks) and keep mutable state in one owner; after a server-side change, update that
   owner explicitly (we refetch via an API and `setItems`), rather than relying on prop-sync.
+
+## Stream large files instead of `readFileSync`
+`fs.readFileSync(path)` + `split("\n")` loads the **whole file** (and a per-line array) into
+memory; `readline.createInterface({ input: fs.createReadStream(path) })` yields one line at a time
+so memory is bounded by the largest line + whatever you choose to keep.
+- **Why it came up:** a 79 MB transcript (single lines up to 733 KB) where only ~0.5% of bytes is
+  the text we keep — streaming parsed it in ~200 ms with no memory blow-up.
+- **Takeaway:** for inputs that can grow without bound (logs, transcripts, exports), stream and
+  retain only the extracted result; never `readFileSync` an open-ended file.
+
+## Incremental checkpoints need a "not-found" fallback
+When resuming from a saved position (here, the last-processed `uuid`), the marker can be missing —
+the file was rotated, compacted, or the checkpoint is stale. If "start after the marker" is the
+only path, a missing marker silently processes **nothing**.
+- **Why it came up:** `started = !sinceUuid` meant a not-found checkpoint left `started=false` for
+  the whole file → a scan that extracted zero items.
+- **Takeaway:** always handle "marker not found" explicitly — fall back to processing everything
+  (idempotent dedup downstream makes the re-process safe).

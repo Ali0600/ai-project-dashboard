@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
 
 export const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 
@@ -70,13 +71,17 @@ const NOISE_PREFIXES = ["<command-", "<local-command-", "Caveat:", "[Request int
 
 /**
  * Read a transcript and return cleaned conversation text plus metadata.
- * If `sinceUuid` is given, only content *after* that entry is returned
- * (incremental re-scan).
+ *
+ * Streams the file line-by-line so a 79 MB transcript never loads into memory at
+ * once (only one line + the small cleaned-text array are held). If `sinceUuid` is
+ * given, only content *after* that entry is returned (incremental re-scan); if that
+ * checkpoint is not found in the file, we fall back to the full transcript rather
+ * than silently extracting nothing.
  */
-export function readTranscript(transcriptPath: string, sinceUuid?: string | null): ReadResult {
-  const raw = fs.readFileSync(transcriptPath, "utf8");
-  const lines = raw.split("\n");
-
+export async function readTranscript(
+  transcriptPath: string,
+  sinceUuid?: string | null,
+): Promise<ReadResult> {
   const sessionId = path.basename(transcriptPath).replace(/\.jsonl$/, "");
   const meta: TranscriptMeta = {
     sessionId,
@@ -90,10 +95,15 @@ export function readTranscript(transcriptPath: string, sinceUuid?: string | null
   };
 
   const segments: string[] = [];
-  let started = !sinceUuid; // if no checkpoint, collect from the start
   let firstUserText: string | null = null;
+  let checkpointIndex = -1; // segments.length at the moment we pass `sinceUuid`
 
-  for (const line of lines) {
+  const rl = readline.createInterface({
+    input: fs.createReadStream(transcriptPath, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+
+  for await (const line of rl) {
     if (!line.trim()) continue;
     let entry: Record<string, unknown>;
     try {
@@ -115,11 +125,14 @@ export function readTranscript(transcriptPath: string, sinceUuid?: string | null
     }
     if (uuid) meta.lastUuid = uuid;
 
-    // Honour the checkpoint: skip everything up to & including sinceUuid.
-    if (!started) {
-      if (uuid === sinceUuid) started = true;
+    // Mark where the checkpoint is (content after it is "new"), then skip that entry.
+    if (sinceUuid && checkpointIndex === -1 && uuid === sinceUuid) {
+      checkpointIndex = segments.length;
       continue;
     }
+
+    // Internal sub-agent turns are noise — skip their content (but keep advancing meta).
+    if (entry.isSidechain === true) continue;
 
     const msg = entry.message as { role?: string; content?: unknown } | undefined;
     if (type === "assistant" && msg) {
@@ -136,16 +149,21 @@ export function readTranscript(transcriptPath: string, sinceUuid?: string | null
 
   meta.title = firstString(meta.title, firstUserText?.slice(0, 80), meta.slug, sessionId);
 
+  // No checkpoint -> everything. Checkpoint found -> only what's after it.
+  // Checkpoint given but missing (rotated/stale) -> fall back to everything.
+  const chosen =
+    !sinceUuid || checkpointIndex < 0 ? segments : segments.slice(checkpointIndex);
+
   return {
     meta,
-    text: segments.join("\n\n"),
+    text: chosen.join("\n\n"),
     lastUuid: meta.lastUuid,
-    empty: segments.length === 0,
+    empty: chosen.length === 0,
   };
 }
 
 /** Split text into chunks no larger than maxChars, preferring paragraph breaks. */
-export function chunkText(text: string, maxChars = 40000): string[] {
+export function chunkText(text: string, maxChars = 120000): string[] {
   if (text.length <= maxChars) return text ? [text] : [];
   const paras = text.split("\n\n");
   const chunks: string[] = [];
