@@ -227,3 +227,18 @@ command line**, so `-f` never matches it. Two `next start` on one port also sile
 - **Takeaway:** target the thing holding the socket — `lsof -ti tcp:3100 | xargs kill -9` — then
   confirm the port is free before restarting. Env vars and child workers make name-based kills
   unreliable; and when "the fix isn't showing," suspect a stale process before suspecting the code.
+
+## Reconciling LLM references back to your records needs fuzzy matching
+When an LLM reports "this existing item is now done", it paraphrases the title ("Basket feature")
+rather than echoing your stored one ("Build in-app basket optimizer (Basket feature)"). Exact /
+normalized-string matching then silently fails and the completion is never recorded. Match by
+**token-set containment** instead — share of the smaller token set that overlaps (1.0 when one ⊆
+the other), after dropping generic stop-words — and only accept a hit that's both strong (≥0.7) and
+**unambiguous** (clear margin over the 2nd-best) to avoid false positives.
+- **Why it came up:** a built feature stayed "todo" because the basket task was *created and
+  completed in the same scan* (so it wasn't in the pre-scan open-items list), and even a re-scan
+  couldn't match the paraphrased reference. Fix = a **full rescan** (re-read all content with current
+  open items) + fuzzy matching.
+- **Takeaway:** any LLM-extraction-into-DB flow that links model output to existing rows should
+  fuzzy-match (token containment) with an ambiguity guard — and offer a "reprocess everything" path,
+  since incremental passes only ever see each piece of content once.
