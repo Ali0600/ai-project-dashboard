@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { hasUnscannedActivity, titleMatchScore, tokenize } from "./store";
+import { hasUnscannedActivity, titleJaccard, titleMatchScore, tokenize } from "./store";
 import type { ConversationRow } from "./types";
 
 const tmpFiles: string[] = [];
@@ -56,6 +56,24 @@ describe("titleMatchScore / tokenize (fuzzy completion matching)", () => {
   it("does not over-match a partial/weaker reference above the accept threshold (0.7)", () => {
     // {server, side, optimizer} ∩ {basket, optimizer} = 1 / min(3,2) = 0.5
     expect(titleMatchScore("server-side optimizer", stored)).toBeLessThan(0.7);
+  });
+});
+
+describe("titleJaccard (reworded-duplicate detection, threshold 0.6)", () => {
+  it("treats reworded versions of the same task as duplicates", () => {
+    // identical token sets, just reordered/rephrased
+    const a = titleJaccard("Add EXPO_TOKEN GitHub secret", "Add EXPO_TOKEN secret to GitHub");
+    expect(a.score).toBe(1);
+    expect(a.shared).toBe(4);
+    // overlapping-but-rephrased still clears 0.6
+    expect(titleJaccard("Add EXPO_TOKEN secret for OTA", "Add EXPO_TOKEN GitHub secret").score).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it("keeps genuinely distinct tasks separate (below 0.6)", () => {
+    expect(titleJaccard("Add EXPO_TOKEN secret", "Add SENTRY_TOKEN secret").score).toBeLessThan(0.6);
+    expect(titleJaccard("Deploy to Render", "Enable gated Render deploy via hook").score).toBeLessThan(0.6);
+    // a short subset of a longer task is NOT a duplicate (that's containment, not Jaccard)
+    expect(titleJaccard("Add tests", "Add tests for the parser module").score).toBeLessThan(0.6);
   });
 });
 

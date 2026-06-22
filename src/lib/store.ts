@@ -47,6 +47,46 @@ export function titleMatchScore(ref: string, candidate: string): number {
   return inter / Math.min(a.size, b.size);
 }
 
+/**
+ * Jaccard similarity of two titles' token sets (|∩| / |∪|) plus the shared-token count. Used for
+ * **de-duplication**: two tasks that are the same thing reworded have nearly identical token sets
+ * (high Jaccard), whereas a shorter task that's merely a subset of a longer one scores lower — so
+ * genuinely distinct-but-related tasks aren't wrongly merged.
+ */
+export function titleJaccard(a: string, b: string): { score: number; shared: number } {
+  const A = new Set(tokenize(a));
+  const B = new Set(tokenize(b));
+  if (A.size === 0 || B.size === 0) return { score: 0, shared: 0 };
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return { score: union === 0 ? 0 : inter / union, shared: inter };
+}
+
+/** Minimum Jaccard + shared tokens for two titles to count as the same item (reworded). */
+const DEDUP_JACCARD = 0.6;
+
+/** Find an existing same-kind item that is a reworded duplicate of `title` (any status). */
+export function findFuzzyDuplicate(
+  projectId: number,
+  kind: ItemKind,
+  title: string,
+): ItemRow | undefined {
+  const items = getDb()
+    .prepare("SELECT * FROM items WHERE project_id = ? AND kind = ?")
+    .all(projectId, kind) as ItemRow[];
+  let best: ItemRow | undefined;
+  let bestScore = 0;
+  for (const it of items) {
+    const { score, shared } = titleJaccard(title, it.title);
+    if (shared >= 2 && score >= DEDUP_JACCARD && score > bestScore) {
+      bestScore = score;
+      best = it;
+    }
+  }
+  return best;
+}
+
 function basename(p: string): string {
   const parts = p.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || p;
@@ -263,6 +303,11 @@ export function insertItem(a: InsertItemArgs): number | null {
   // existing, non-dismissed task is redundant — skip it. Same-kind dups are handled by the
   // UNIQUE(project_id, kind, norm_key) constraint below.
   if (a.kind === "suggestion" && taskExistsWithKey(a.projectId, normKey)) return null;
+  // Fuzzy same-kind dedup for actionable items: a reworded version of an existing task/suggestion
+  // (any status — incl. done/dismissed) shouldn't reappear as a new row on a re-scan.
+  if ((a.kind === "task" || a.kind === "suggestion") && findFuzzyDuplicate(a.projectId, a.kind, a.title)) {
+    return null;
+  }
 
   const info = db
     .prepare(
