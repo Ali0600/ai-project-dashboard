@@ -182,3 +182,14 @@ older cached server payload never sent → a runtime crash (e.g. `Cannot read pr
   `conversationIds.length` and the Scan button stopped updating in place.
 - **Takeaway:** default array/object props (`x = []`) so a transient prop-shape mismatch can't
   hard-crash; when "it only works after a hard refresh," suspect bundle drift, not your logic.
+
+## Backing up a SQLite DB in WAL mode needs more than `cp`
+In WAL journal mode, recent (committed) writes live in a side-car `-wal` file and aren't folded
+into the main `.db` until a checkpoint. So `cp dashboard.db backup.db` can capture a **stale**
+snapshot missing most rows. Copy `*.db` + `*.db-wal` + `*.db-shm` together, run
+`PRAGMA wal_checkpoint(TRUNCATE)` first, or use the online backup API (`better-sqlite3`'s
+`db.backup(path)`), which produces a consistent standalone copy.
+- **Why it came up:** before a data migration I `cp`'d the DB and the "backup" showed 23 items vs
+  110 live — the rest were sitting in the `-wal` file; `db.backup()` captured the full set.
+- **Takeaway:** never back up a live WAL database with a plain file copy — checkpoint first or use
+  the engine's backup API, or the restore will silently lose recent data.
