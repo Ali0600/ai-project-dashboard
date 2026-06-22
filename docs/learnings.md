@@ -239,6 +239,14 @@ the other), after dropping generic stop-words — and only accept a hit that's b
   completed in the same scan* (so it wasn't in the pre-scan open-items list), and even a re-scan
   couldn't match the paraphrased reference. Fix = a **full rescan** (re-read all content with current
   open items) + fuzzy matching.
+- **Pick the metric to fit the question.** *Reference → record* ("is this open task the one the
+  model says is done?") wants **containment** (the model's short paraphrase is a *subset* of your
+  longer stored title) + an ambiguity guard. *Record ↔ record* ("are these two tasks the same thing
+  reworded?", i.e. de-dup) wants **Jaccard** (|∩|/|∪|): it requires the token *sets* to largely
+  coincide, so "Add EXPO_TOKEN GitHub secret" dedups against "Add EXPO_TOKEN secret to GitHub" but a
+  short task isn't swallowed by a longer superset. Containment for dedup over-matches ("Deploy to
+  Render" ⊆ "Enable gated Render deploy via hook"); Jaccard keeps them distinct.
 - **Takeaway:** any LLM-extraction-into-DB flow that links model output to existing rows should
-  fuzzy-match (token containment) with an ambiguity guard — and offer a "reprocess everything" path,
-  since incremental passes only ever see each piece of content once.
+  fuzzy-match — containment for ref→record, Jaccard for dedup — and dedup must check rows of **every
+  status** (done/dismissed too), or a re-scan recreates a finished item under new wording. Offer a
+  "reprocess everything" path, since incremental passes only ever see each piece of content once.
