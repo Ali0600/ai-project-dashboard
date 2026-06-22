@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { extractOnce, mergeExtractions } from "./claude";
 import { ingestExtraction } from "./ingest";
@@ -46,6 +47,21 @@ export async function scanTranscript(
   const incremental = opts.incremental ?? true;
   const existing = getConversationBySession(sessionIdFromPath(transcriptPath));
   const since = incremental ? existing?.last_scanned_uuid ?? null : null;
+
+  // The transcript may have been removed/rotated since we recorded it (compaction, cleanup,
+  // a session that never persisted). Skip gracefully and clear it from "pending" so the
+  // batch doesn't keep failing on a file that no longer exists.
+  if (!fs.existsSync(transcriptPath)) {
+    if (existing) markConversationScanned(existing.id, existing.last_scanned_uuid ?? null);
+    return {
+      conversationId: existing?.id ?? 0,
+      created: 0,
+      flaggedDone: 0,
+      createdIds: [],
+      chunks: 0,
+      skipped: true,
+    };
+  }
 
   const { meta, text, lastUuid, empty } = await readTranscript(transcriptPath, since);
 

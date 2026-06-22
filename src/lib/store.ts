@@ -77,15 +77,17 @@ export function listProjects(): ProjectSummary[] {
 
 /** True if the transcript has activity newer than our last scan (live "needs scan"). */
 export function hasUnscannedActivity(conv: ConversationRow): boolean {
-  if (conv.scan_status === "needs_scan") return true;
-  if (!conv.last_scanned_at) return true;
+  // A transcript that no longer exists on disk can't be scanned — never "pending".
+  let mtimeMs: number;
   try {
-    const mtimeMs = fs.statSync(conv.transcript_path).mtimeMs;
-    const scannedMs = new Date(conv.last_scanned_at.replace(" ", "T") + "Z").getTime();
-    return mtimeMs > scannedMs + 2000; // 2s grace so a just-scanned convo doesn't flap
+    mtimeMs = fs.statSync(conv.transcript_path).mtimeMs;
   } catch {
     return false;
   }
+  if (conv.scan_status === "needs_scan") return true;
+  if (!conv.last_scanned_at) return true;
+  const scannedMs = new Date(conv.last_scanned_at.replace(" ", "T") + "Z").getTime();
+  return mtimeMs > scannedMs + 2000; // 2s grace so a just-scanned convo doesn't flap
 }
 
 export function getProject(id: number): ProjectRow | undefined {
