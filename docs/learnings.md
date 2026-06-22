@@ -203,3 +203,15 @@ your "first start…end" match grabs the example, not the real section.
 - **Takeaway:** make structural delimiters unambiguous vs. prose — require them on their **own line**
   (anchor with `^…$` + multiline), or use a token unlikely to appear in writing. Test with a fixture
   that mentions the marker inline *and* uses it for real.
+
+## Stream progress for long server ops instead of one opaque request
+A request that does minutes of server work (here, N×`claude -p` per scan) looks frozen — the user
+can't tell "working" from "stuck". Return a **`ReadableStream`** of newline-delimited JSON instead:
+the handler emits `{phase:"extracting",index,total}` events as it goes, then a terminal
+`{phase:"result",…}`/`{phase:"error",…}`. The client reads `res.body.getReader()`, splits on `\n`,
+and updates the UI live. No SSE/WebSocket needed; works over a normal `fetch` POST.
+- **Why it came up:** the Scan button gave no feedback during long headless extraction; a streamed
+  step + per-step elapsed timer makes it obvious it's alive (verified non-buffered via
+  `curl -N` timestamps — set `cache-control: no-transform` to avoid proxy buffering).
+- **Takeaway:** for any operation longer than ~1–2s, stream coarse progress; a **per-step timer**
+  (reset on each step) is the cheapest "is it stuck?" signal — a frozen number means trouble.
