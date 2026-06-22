@@ -77,7 +77,19 @@ function spawnClaude(args: string[], opts: { cwd?: string; input?: string } = {}
     });
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`claude exited with code ${code}: ${err || out}`.trim()));
+        const combined = `${out}\n${err}`;
+        if (/\b401\b|authenticate|authentication credentials|invalid api key|oauth/i.test(combined)) {
+          reject(
+            new ClaudeUnavailableError(
+              "The `claude` CLI failed to authenticate (401). The dashboard server is using expired/invalid " +
+                "credentials — this happens when the dev server was started from an environment whose token has " +
+                "since expired. Restart the dashboard from a terminal where `claude` is logged in (run `claude` " +
+                "once to log in, or `claude setup-token` for a persistent headless token), then scan again.",
+            ),
+          );
+        } else {
+          reject(new Error(`claude exited with code ${code}: ${err || out}`.trim()));
+        }
       } else {
         resolve(out);
       }

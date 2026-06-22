@@ -17,10 +17,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     if (e instanceof ClaudeUnavailableError) {
-      return NextResponse.json(
-        { error: "The `claude` CLI is not available on the server PATH." },
-        { status: 503 },
-      );
+      // Surface the specific guidance (CLI missing on PATH, or an auth/401 failure).
+      return NextResponse.json({ error: e.message }, { status: 503 });
     }
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
