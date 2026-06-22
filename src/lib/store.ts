@@ -94,6 +94,16 @@ export function getProject(id: number): ProjectRow | undefined {
   return getDb().prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | undefined;
 }
 
+/** Look up a project by its cwd without creating one (used by the hook to only flag known projects). */
+export function getProjectByCwd(cwd: string): ProjectRow | undefined {
+  return getDb().prepare("SELECT * FROM projects WHERE cwd = ?").get(cwd) as ProjectRow | undefined;
+}
+
+/** Delete a project and (via ON DELETE CASCADE) its conversations + items. */
+export function deleteProject(id: number): void {
+  getDb().prepare("DELETE FROM projects WHERE id = ?").run(id);
+}
+
 /* ------------------------------ conversations ---------------------------- */
 
 export function upsertConversation(

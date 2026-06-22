@@ -41,6 +41,10 @@ command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` a
   SCHEMA default and the ALTER default identical).
 - The dashboard's own headless `claude -p` runs set `DASHBOARD_EXTRACTION=1` so `flag-hook` ignores
   them (don't capture our subprocesses as conversations).
+- **Capture is opt-in.** A folder becomes a project only via `/sync-board` or `npm run backfill`
+  (both call `getOrCreateProject`). `flag-hook` only flags sessions whose `cwd` is **already** a
+  project (`getProjectByCwd`), so one-off sessions never auto-create projects. The overview
+  (`page.tsx`) shows projects with `total_items > 0` and collapses empty ones into a `<details>`.
 - Priority is stored as an INTEGER rank (1=urgent…4=low); consts live in `priority.ts` (no zod).
 - Pass a stable `useId()` to `<DndContext id=…>` (avoids hydration mismatch); format dates via
   `lib/format.ts` (locale-free) for the same reason.

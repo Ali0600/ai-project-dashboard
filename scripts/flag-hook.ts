@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { upsertConversation } from "../src/lib/store";
+import { getProjectByCwd, upsertConversation } from "../src/lib/store";
 import type { TranscriptMeta } from "../src/lib/transcripts";
 
 function readStdin(): string {
@@ -32,11 +32,13 @@ try {
     (payload.session_id as string) ||
     (transcriptPath ? path.basename(transcriptPath).replace(/\.jsonl$/, "") : arg("--session"));
 
-  // Skip the dashboard's own headless extraction runs and bare home-dir sessions —
-  // neither is a real project conversation.
+  // Skip the dashboard's own headless extraction runs and bare home-dir sessions.
   const skip = !!process.env.DASHBOARD_EXTRACTION || cwd === os.homedir();
 
-  if (transcriptPath && cwd && sessionId && !skip) {
+  // Only flag sessions for folders the dashboard ALREADY tracks as a project. A folder becomes a
+  // project explicitly — via `/sync-board` or `npm run backfill` — so random one-off sessions
+  // (e.g. in /tmp) never auto-create projects. Once a project exists, the hook keeps it fresh.
+  if (transcriptPath && cwd && sessionId && !skip && getProjectByCwd(cwd)) {
     const meta: TranscriptMeta = {
       sessionId,
       cwd,

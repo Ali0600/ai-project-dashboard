@@ -10,8 +10,11 @@ normally scroll away in chat don't get lost.
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash
   command uses your current session; backfill and the dashboard's "Scan" button use headless
   Claude Code (`claude -p`), reusing your existing login.
-- **Automatic capture** — a `SessionEnd` hook plus live transcript-mtime detection surface
-  conversations with unscanned activity; run the LLM extraction on demand from the UI or `/sync-board`.
+- **Opt-in capture** — a folder becomes a project when you run `/sync-board` in it (or
+  `npm run backfill`). After that, a `SessionEnd` hook plus live transcript-mtime detection flag new
+  activity in **already-tracked** projects as "needs scan" — so random one-off sessions (e.g. in
+  `/tmp`) never auto-create projects. The overview lists projects with captured items and tucks
+  empty/awaiting-scan folders into a collapsible group.
 - **Completion tracking** — re-scans flag tasks that look finished ("Looks done?") for you to
   confirm; you can also drag cards across the board.
 - **Act on tasks** — set Urgent/High/Medium/Low priority, add tasks manually, open a card for a
@@ -44,7 +47,8 @@ normally scroll away in chat don't get lost.
 
 ```
 Conversation ends ──SessionEnd hook──> scripts/flag-hook.ts  ──> mark conversation needs_scan
-                                                                  (cheap, no LLM)
+                                          (only if cwd is already      (cheap, no LLM)
+                                           a tracked project)
 Extraction (any of):
   /sync-board (live session)        ─┐
   "Scan" button  -> API route       ─┼─> Claude reads transcript text ─> structured JSON
