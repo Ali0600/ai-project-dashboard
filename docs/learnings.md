@@ -160,6 +160,20 @@ programmatic `element.click()` may not trigger React handlers on a dnd-kit dragg
 - **Takeaway:** CDP + Node's global `WebSocket` is a zero-dependency way to script a real browser for
   verification; click via `Input.dispatchMouseEvent`, not `.click()`, when synthetic events get swallowed.
 
+## Long-running processes freeze their auth env at launch
+A process captures a snapshot of environment variables when it starts. If those include a
+short-lived token (e.g. one injected by a desktop app / IDE integrated terminal), the process keeps
+using that stale value after the token expires — and every subprocess it spawns inherits the dead
+credential, so calls fail with 401 even though an interactive session right next to it still works.
+- **Why it came up:** the dashboard dev server, started from the Claude desktop app's terminal,
+  captured an ephemeral auth token; hours later its headless `claude -p` scan failed with
+  `401 Invalid authentication credentials` while the interactive app (which refreshes its own token)
+  was fine.
+- **Takeaway:** for headless/automation auth use a *durable* credential (`claude setup-token`, a
+  service account, a refreshed secret) rather than an interactive session's injected env; restart
+  long-running servers from an environment with persistent auth, and turn raw provider errors
+  (401/403) into an actionable message instead of dumping the response.
+
 ## HMR prop-drift in long-lived dev tabs
 During heavy live-editing, a browser tab can end up running a client bundle that expects props an
 older cached server payload never sent → a runtime crash (e.g. `Cannot read properties of undefined
