@@ -44,6 +44,12 @@ command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` a
 - Priority is stored as an INTEGER rank (1=urgent…4=low); consts live in `priority.ts` (no zod).
 - Pass a stable `useId()` to `<DndContext id=…>` (avoids hydration mismatch); format dates via
   `lib/format.ts` (locale-free) for the same reason.
+- **Plan-file backlog capture** (`plans.ts`): scans fold the **Backlog** section of any
+  `~/.claude/plans/*.md` the transcript references (`readTranscript` returns `planRefs`; `scan.ts`
+  reads + injects it as an extraction chunk). `extractBacklog` returns `null` unless the plan has a
+  `<!-- backlog:start/end -->` fence or a backlog-keyword heading/bold-label — no section → no noise.
+  Scan/backfill only (not live `/sync-board`); off via `SCAN_PLAN_FILES=0`. Keep your own plan files'
+  backlog inside the fence so they're captured cleanly.
 
 ## Commands
 

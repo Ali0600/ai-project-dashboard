@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractOnce, mergeExtractions } from "./claude";
 import { ingestExtraction } from "./ingest";
+import { extractBacklog } from "./plans";
 import {
   getConversationBySession,
   markConversationScanned,
@@ -14,12 +15,41 @@ import type { ExtractionResult } from "./types";
 /** Cap per-scan headless calls to bound cost. */
 const MAX_CHUNKS = Number(process.env.SCAN_MAX_CHUNKS || 16);
 const CHUNK_CHARS = Number(process.env.CHUNK_CHARS || 120000);
+/** Max plan files whose Backlog we fold into one scan. */
+const MAX_PLAN_CHUNKS = 2;
 
 /** Over the cap, keep the first few + the most recent chunks (don't silently drop the middle). */
 function selectChunks(chunks: string[], max: number): string[] {
   if (chunks.length <= max) return chunks;
   const head = Math.min(3, max - 1);
   return [...chunks.slice(0, head), ...chunks.slice(chunks.length - (max - head))];
+}
+
+/**
+ * Build extraction chunks from the Backlog section of any plan files the conversation references.
+ * A plan with no recognizable Backlog section contributes nothing (the noise guard). Off when
+ * `SCAN_PLAN_FILES=0`.
+ */
+function buildPlanChunks(planRefs: string[]): string[] {
+  if (process.env.SCAN_PLAN_FILES === "0") return [];
+  const chunks: string[] = [];
+  for (const planPath of planRefs) {
+    if (chunks.length >= MAX_PLAN_CHUNKS) break;
+    let md: string;
+    try {
+      md = fs.readFileSync(planPath, "utf8");
+    } catch {
+      continue; // referenced plan was moved/deleted
+    }
+    const backlog = extractBacklog(md);
+    if (!backlog) continue;
+    chunks.push(
+      `=== PROJECT PLAN BACKLOG (${path.basename(planPath)}) — intended but NOT yet built; ` +
+        `emit as tasks/suggestions, and treat anything the plan marks done/SHIPPED as completed ===\n` +
+        backlog.slice(0, CHUNK_CHARS),
+    );
+  }
+  return chunks;
 }
 
 export interface ScanResult {
@@ -63,7 +93,7 @@ export async function scanTranscript(
     };
   }
 
-  const { meta, text, lastUuid, empty } = await readTranscript(transcriptPath, since);
+  const { meta, text, lastUuid, empty, planRefs } = await readTranscript(transcriptPath, since);
 
   // No cwd means this isn't a real interactive project conversation (e.g. a headless
   // `claude -p` artifact). Skip it rather than inventing a junk project.
@@ -73,12 +103,16 @@ export async function scanTranscript(
 
   const conv = upsertConversation(meta);
 
-  if (empty) {
+  // Fold in referenced plan files' Backlog sections (scan/backfill only, not live /sync-board).
+  const planChunks = buildPlanChunks(planRefs);
+
+  // Nothing new in the transcript and no plan backlog to (re)read → skip.
+  if (empty && planChunks.length === 0) {
     markConversationScanned(conv.id, lastUuid);
     return { conversationId: conv.id, created: 0, flaggedDone: 0, createdIds: [], chunks: 0, skipped: true };
   }
 
-  const chunks = selectChunks(chunkText(text, CHUNK_CHARS), MAX_CHUNKS);
+  const chunks = [...selectChunks(chunkText(text, CHUNK_CHARS), MAX_CHUNKS), ...planChunks];
 
   const existingTitles = openItemTitles(conv.project_id);
   const parts: ExtractionResult[] = [];

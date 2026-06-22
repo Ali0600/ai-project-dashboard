@@ -61,6 +61,14 @@ Data source: Claude Code stores each conversation as append-only JSONL at
 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. The parser strips tool noise and keeps
 the user/assistant text.
 
+**Plan-file backlog capture.** When a conversation references a plan-mode document
+(`~/.claude/plans/<slug>.md`), the scan also folds that plan's **Backlog** section into extraction
+(those edits are made via tools the transcript parser strips, so they're otherwise invisible). To
+avoid noise from the design/“done” parts of a plan, only a clearly delimited backlog is read — wrap
+it in `<!-- backlog:start -->` … `<!-- backlog:end -->`, or use a `## Backlog` heading (also
+matched: “Not built”, “Open items”, “Remaining”, “TODO”). A plan without one contributes nothing.
+Disable with `SCAN_PLAN_FILES=0`.
+
 ## Getting started
 
 ```bash
@@ -104,6 +112,7 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `CLAUDE_IMPLEMENT_BUDGET_USD` | `0.50` | Per-call spend cap for "Implement" |
 | `CHUNK_CHARS` | `120000` | Max characters per extraction chunk |
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
+| `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |
 
 ## Docker
 

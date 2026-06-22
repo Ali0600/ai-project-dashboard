@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { findPlanRefs } from "./plans";
 
 export const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 
@@ -24,6 +25,8 @@ export interface ReadResult {
   lastUuid: string | null;
   /** True if there was no new content past `sinceUuid`. */
   empty: boolean;
+  /** Plan files (`~/.claude/plans/*.md`) referenced anywhere in the transcript. */
+  planRefs: string[];
 }
 
 /** Locate every conversation transcript on disk. */
@@ -95,6 +98,7 @@ export async function readTranscript(
   };
 
   const segments: string[] = [];
+  const planRefs = new Set<string>();
   let firstUserText: string | null = null;
   let checkpointIndex = -1; // segments.length at the moment we pass `sinceUuid`
 
@@ -105,6 +109,9 @@ export async function readTranscript(
 
   for await (const line of rl) {
     if (!line.trim()) continue;
+    // Plan-file references can appear in any entry (incl. tool/system lines we otherwise strip),
+    // so collect them from the raw line regardless of checkpoint or sidechain filtering.
+    for (const p of findPlanRefs(line)) planRefs.add(p);
     let entry: Record<string, unknown>;
     try {
       entry = JSON.parse(line);
@@ -159,6 +166,7 @@ export async function readTranscript(
     text: chosen.join("\n\n"),
     lastUuid: meta.lastUuid,
     empty: chosen.length === 0,
+    planRefs: [...planRefs],
   };
 }
 
