@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { flagSuggestedDone, insertItem } from "./store";
+import { dismissSuggestionsCollidingWithTasks, flagSuggestedDone, insertItem } from "./store";
 import type { ExtractionResult } from "./types";
 
 export interface IngestResult {
@@ -40,10 +40,11 @@ export function ingestExtraction(opts: {
         }),
       );
     }
+    // Retire any pre-existing suggestion that a task (including ones just added) now covers.
+    dismissSuggestionsCollidingWithTasks(projectId);
 
     const simple = [
-      ["recommendation", extraction.recommendations],
-      ["next_step", extraction.next_steps],
+      ["suggestion", extraction.suggestions],
       ["learning", extraction.learnings],
     ] as const;
     for (const [kind, arr] of simple) {

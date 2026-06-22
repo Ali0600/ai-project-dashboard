@@ -1,5 +1,5 @@
 ---
-description: Sync THIS conversation's tasks, recommendations, next steps & learnings into the AI Project Dashboard.
+description: Sync THIS conversation's tasks, suggestions & learnings into the AI Project Dashboard.
 allowed-tools: Bash, Read
 ---
 
@@ -14,22 +14,22 @@ Steps:
 
    ```json
    {
-     "tasks":           [{"title": "", "detail": "", "status_guess": "todo", "priority": "urgent|high|medium|low", "source_quote": ""}],
-     "recommendations": [{"title": "", "detail": "", "source_quote": ""}],
-     "next_steps":      [{"title": "", "detail": "", "source_quote": ""}],
-     "learnings":       [{"title": "", "detail": "", "source_quote": ""}],
-     "completed":       [{"existing_id_or_title": "", "evidence_quote": ""}]
+     "tasks":       [{"title": "", "detail": "", "status_guess": "todo", "priority": "urgent|high|medium|low", "source_quote": ""}],
+     "suggestions": [{"title": "", "detail": "", "source_quote": ""}],
+     "learnings":   [{"title": "", "detail": "", "source_quote": ""}],
+     "completed":   [{"existing_id_or_title": "", "evidence_quote": ""}]
    }
    ```
 
    - **tasks**: concrete things to build / fix / configure / test. Set `priority`: urgent
      (blockers/security), high, medium (default), or low (nice-to-have).
-   - **recommendations**: advice you gave ("you should", "I recommend", "consider").
-   - **next_steps**: anything you flagged as a next or optional step.
+   - **suggestions**: advice, ideas, or optional next steps you proposed that aren't already
+     concrete committed tasks ("you should", "I recommend", "consider", "Optional Next Step:").
    - **learnings**: teachable, transferable concepts.
    - **completed**: tasks discussed earlier in this conversation that are now finished
      (quote the evidence).
-   - Keep titles short (≤ 10 words); put context in `detail`.
+   - Keep titles short (≤ 10 words); put context in `detail`. Never list the same item as both
+     a task and a suggestion.
 
 3. Write that JSON to `/tmp/sync-board.json`.
 4. Ingest it into the dashboard (replace `<PWD>` with the directory from step 1):

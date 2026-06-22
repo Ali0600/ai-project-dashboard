@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** The four kinds of things we pull out of a conversation. */
-export const ITEM_KINDS = ["task", "recommendation", "next_step", "learning"] as const;
+/** The kinds of things we pull out of a conversation. */
+export const ITEM_KINDS = ["task", "suggestion", "learning"] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
 export const ITEM_STATUSES = ["todo", "in_progress", "done", "dismissed"] as const;
@@ -38,13 +38,21 @@ const Completed = z.object({
   evidence_quote: z.string().optional().default(""),
 });
 
-export const ExtractionResult = z.object({
-  tasks: z.array(Task).optional().default([]),
-  recommendations: z.array(SimpleItem).optional().default([]),
-  next_steps: z.array(SimpleItem).optional().default([]),
-  learnings: z.array(SimpleItem).optional().default([]),
-  completed: z.array(Completed).optional().default([]),
-});
+export const ExtractionResult = z
+  .object({
+    tasks: z.array(Task).optional().default([]),
+    suggestions: z.array(SimpleItem).optional().default([]),
+    learnings: z.array(SimpleItem).optional().default([]),
+    completed: z.array(Completed).optional().default([]),
+    // Legacy keys from older /sync-board copies — folded into `suggestions` below so a
+    // stale global command never silently drops data.
+    recommendations: z.array(SimpleItem).optional(),
+    next_steps: z.array(SimpleItem).optional(),
+  })
+  .transform(({ recommendations, next_steps, ...rest }) => ({
+    ...rest,
+    suggestions: [...rest.suggestions, ...(recommendations ?? []), ...(next_steps ?? [])],
+  }));
 export type ExtractionResult = z.infer<typeof ExtractionResult>;
 
 /* ----------------------------------------------------------------------------

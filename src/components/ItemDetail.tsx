@@ -8,8 +8,7 @@ import PriorityPill from "./PriorityPill";
 
 const KIND_LABEL: Record<string, string> = {
   task: "Task",
-  recommendation: "Recommendation",
-  next_step: "Next step",
+  suggestion: "Suggestion",
   learning: "Learning",
 };
 
@@ -27,6 +26,7 @@ export default function ItemDetail({
   onDismissSuggestion,
   onPriorityChange,
   onImplement,
+  onPromote,
 }: {
   item: ItemWithSource | null;
   onClose: () => void;
@@ -35,6 +35,7 @@ export default function ItemDetail({
   onDismissSuggestion: (id: number) => void;
   onPriorityChange: (id: number, rank: number) => void;
   onImplement: (id: number) => Promise<void>;
+  onPromote: (id: number) => void;
 }) {
   const [implBusy, setImplBusy] = useState(false);
   const [implError, setImplError] = useState<string | null>(null);
@@ -193,6 +194,18 @@ export default function ItemDetail({
 
         {/* Actions */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
+          {item.kind === "suggestion" && (
+            <button
+              onClick={() => {
+                onPromote(item.id);
+                onClose();
+              }}
+              title="Move this suggestion onto the Board as a task"
+              className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+            >
+              ▶ Promote to task
+            </button>
+          )}
           {isTask ? (
             STATUS_OPTIONS.map((s) => (
               <button

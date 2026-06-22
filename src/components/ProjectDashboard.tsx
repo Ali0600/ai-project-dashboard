@@ -9,15 +9,13 @@ import type { ItemKind, ItemStatus, ItemWithSource } from "@/lib/types";
 
 const TABS: { key: ItemKind; label: string; empty: string }[] = [
   { key: "task", label: "Board", empty: "" },
-  { key: "recommendation", label: "Recommendations", empty: "No recommendations captured yet." },
-  { key: "next_step", label: "Next Steps", empty: "No next steps captured yet." },
+  { key: "suggestion", label: "Suggestions", empty: "No suggestions captured yet." },
   { key: "learning", label: "Learnings", empty: "No learnings captured yet." },
 ];
 
 const KIND_NOUN: Record<ItemKind, string> = {
   task: "task",
-  recommendation: "recommendation",
-  next_step: "next step",
+  suggestion: "suggestion",
   learning: "learning",
 };
 
@@ -64,6 +62,16 @@ export default function ProjectDashboard({
   // PriorityPill issues its own PATCH; we just update state so the column re-sorts.
   const setPriority = (id: number, rank: number) =>
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, priority: rank } : i)));
+
+  // Promote a suggestion to a Board task. Optimistically move it, persist, then refetch so the
+  // rare "merged" case (a duplicate task already existed → suggestion dismissed) self-corrects.
+  async function promote(id: number) {
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, kind: "task", status: "todo" } : i)),
+    );
+    await patch(id, { promote: true });
+    await refetch();
+  }
 
   // Draft an implementation plan (read-only headless run); persists + shows in the modal.
   async function implement(id: number): Promise<void> {
@@ -246,6 +254,7 @@ export default function ProjectDashboard({
           recentlyAdded={recentlyAdded}
           onSetStatus={setStatus}
           onOpenDetail={setSelectedId}
+          onPromote={promote}
         />
       )}
 
@@ -258,6 +267,7 @@ export default function ProjectDashboard({
         onDismissSuggestion={dismissSuggestion}
         onPriorityChange={setPriority}
         onImplement={implement}
+        onPromote={promote}
       />
     </div>
   );

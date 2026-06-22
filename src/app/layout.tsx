@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AI Project Dashboard",
-  description: "Tasks, recommendations & learnings pulled from your Claude Code conversations",
+  description: "Tasks, suggestions & learnings pulled from your Claude Code conversations",
 };
 
 export default function RootLayout({

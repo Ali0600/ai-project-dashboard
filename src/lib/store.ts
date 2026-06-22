@@ -220,7 +220,14 @@ export interface InsertItemArgs {
 
 /** Insert an item; returns the new row id, or null if it was a duplicate/tombstone. */
 export function insertItem(a: InsertItemArgs): number | null {
-  const info = getDb()
+  const db = getDb();
+  const normKey = normalizeTitle(a.title);
+  // Cross-kind dedup (precedence task > suggestion): a suggestion that just repeats an
+  // existing, non-dismissed task is redundant — skip it. Same-kind dups are handled by the
+  // UNIQUE(project_id, kind, norm_key) constraint below.
+  if (a.kind === "suggestion" && taskExistsWithKey(a.projectId, normKey)) return null;
+
+  const info = db
     .prepare(
       `INSERT INTO items
          (project_id, conversation_id, kind, title, detail, status, priority, source_quote, norm_key)
@@ -236,9 +243,60 @@ export function insertItem(a: InsertItemArgs): number | null {
       status: a.status ?? "todo",
       priority: PRIORITY_RANK[a.priority ?? "medium"],
       source_quote: a.sourceQuote ?? "",
-      norm_key: normalizeTitle(a.title),
+      norm_key: normKey,
     });
   return info.changes > 0 ? Number(info.lastInsertRowid) : null;
+}
+
+/** True if a non-dismissed task with this norm_key already exists in the project. */
+export function taskExistsWithKey(projectId: number, normKey: string): boolean {
+  return !!getDb()
+    .prepare(
+      "SELECT 1 FROM items WHERE project_id = ? AND kind = 'task' AND norm_key = ? AND status != 'dismissed' LIMIT 1",
+    )
+    .get(projectId, normKey);
+}
+
+/** Retire suggestions that duplicate an existing task (run after ingesting tasks). Returns count. */
+export function dismissSuggestionsCollidingWithTasks(projectId: number): number {
+  return getDb()
+    .prepare(
+      `UPDATE items SET status = 'dismissed', updated_at = datetime('now')
+         WHERE project_id = ? AND kind = 'suggestion' AND status != 'dismissed'
+           AND EXISTS (
+             SELECT 1 FROM items t
+               WHERE t.project_id = items.project_id AND t.kind = 'task' AND t.norm_key = items.norm_key
+           )`,
+    )
+    .run(projectId).changes;
+}
+
+/**
+ * Promote a suggestion into a Board task. If a non-dismissed task with the same norm_key
+ * already exists (or the rename would collide with a task tombstone), dismiss the suggestion
+ * instead and report "merged".
+ */
+export function promoteToTask(id: number): "promoted" | "merged" | "missing" {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(id) as ItemRow | undefined;
+  if (!row) return "missing";
+  const dismiss = () =>
+    db.prepare("UPDATE items SET status = 'dismissed', updated_at = datetime('now') WHERE id = ?").run(id);
+
+  if (taskExistsWithKey(row.project_id, row.norm_key)) {
+    dismiss();
+    return "merged";
+  }
+  try {
+    db.prepare(
+      "UPDATE items SET kind = 'task', status = 'todo', updated_at = datetime('now') WHERE id = ?",
+    ).run(id);
+    return "promoted";
+  } catch {
+    // UNIQUE(project_id,'task',norm_key) collision with a dismissed task tombstone.
+    dismiss();
+    return "merged";
+  }
 }
 
 export function updateItemStatus(id: number, status: ItemStatus): void {

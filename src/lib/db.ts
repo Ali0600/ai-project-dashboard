@@ -91,4 +91,25 @@ function migrate(db: Database.Database): void {
   // 3 = medium (matches PRIORITY_RANK and the SCHEMA default).
   ensure("priority", "priority INTEGER NOT NULL DEFAULT 3");
   ensure("implementation_plan", "implementation_plan TEXT");
+
+  // One-time consolidation: merge legacy `recommendation` + `next_step` into a single
+  // `suggestion` kind. Idempotent — after the first run there are no legacy-kind rows left,
+  // so every statement becomes a no-op. Order matters: drop would-be UNIQUE collisions first,
+  // then rename, then retire suggestions a task already covers.
+  db.exec(`
+    DELETE FROM items
+      WHERE kind IN ('recommendation','next_step')
+        AND id NOT IN (
+          SELECT MIN(id) FROM items
+            WHERE kind IN ('recommendation','next_step')
+            GROUP BY project_id, norm_key
+        );
+    UPDATE items SET kind = 'suggestion' WHERE kind IN ('recommendation','next_step');
+    UPDATE items SET status = 'dismissed', updated_at = datetime('now')
+      WHERE kind = 'suggestion' AND status <> 'dismissed'
+        AND EXISTS (
+          SELECT 1 FROM items t
+            WHERE t.project_id = items.project_id AND t.kind = 'task' AND t.norm_key = items.norm_key
+        );
+  `);
 }

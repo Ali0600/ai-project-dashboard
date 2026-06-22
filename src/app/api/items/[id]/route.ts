@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   confirmDone,
   dismissSuggestion,
+  promoteToTask,
   updateItemPriority,
   updateItemStatus,
 } from "@/lib/store";
@@ -12,6 +13,8 @@ export const runtime = "nodejs";
 /**
  * PATCH /api/items/:id
  *   { status: "todo"|"in_progress"|"done"|"dismissed" }  -> move card / dismiss item
+ *   { priority: "urgent"|"high"|"medium"|"low" }         -> set priority
+ *   { promote: true }                                    -> promote a suggestion to a Board task
  *   { suggestion: "confirm" }                            -> accept "looks done" -> done
  *   { suggestion: "dismiss" }                            -> reject "looks done" -> keep task
  */
@@ -25,6 +28,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = (await req.json().catch(() => ({}))) as {
     status?: string;
     priority?: string;
+    promote?: boolean;
     suggestion?: "confirm" | "dismiss";
   };
 
@@ -32,6 +36,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     confirmDone(itemId);
   } else if (body.suggestion === "dismiss") {
     dismissSuggestion(itemId);
+  } else if (body.promote === true) {
+    const result = promoteToTask(itemId);
+    return NextResponse.json({ ok: true, result });
   } else if (body.priority && (PRIORITIES as readonly string[]).includes(body.priority)) {
     updateItemPriority(itemId, body.priority as Priority);
   } else if (body.status && (ITEM_STATUSES as readonly string[]).includes(body.status)) {

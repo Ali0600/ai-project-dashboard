@@ -31,7 +31,7 @@ const CLAUDE_MD_BLOCK = `${CLAUDE_MD_START}
 ## AI Project Dashboard
 
 Conversations are captured to a local Kanban dashboard at ${dashboardDir}.
-- When you give the user a **recommendation**, an **Optional Next Step:**, an actionable **task**, or a teachable **learning**, state it clearly so it can be captured.
+- When you give the user an actionable **task**, a **suggestion** (advice / an "Optional Next Step:"), or a teachable **learning**, state it clearly so it can be captured.
 - The user can run **\`/sync-board\`** to pull this conversation's items into the dashboard.
 - A SessionEnd hook flags each conversation as \`needs_scan\`; the user scans it from the dashboard UI or with \`/sync-board\`.
 ${CLAUDE_MD_END}`;
