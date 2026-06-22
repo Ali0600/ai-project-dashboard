@@ -193,3 +193,13 @@ snapshot missing most rows. Copy `*.db` + `*.db-wal` + `*.db-shm` together, run
   110 live — the rest were sitting in the `-wal` file; `db.backup()` captured the full set.
 - **Takeaway:** never back up a live WAL database with a plain file copy — checkpoint first or use
   the engine's backup API, or the restore will silently lose recent data.
+
+## A parser that scans for a delimiter will match the doc that *documents* the delimiter
+If you extract content between markers (`<!-- backlog:start/end -->`), any file that *describes* the
+marker syntax inline — docs, a plan that explains the feature — contains those markers in prose and
+your "first start…end" match grabs the example, not the real section.
+- **Why it came up:** `extractBacklog` pulled `" … "` from a plan whose prose said "prefer a fence
+  `<!-- backlog:start -->` … `<!-- backlog:end -->`"; the real fenced backlog below it was never reached.
+- **Takeaway:** make structural delimiters unambiguous vs. prose — require them on their **own line**
+  (anchor with `^…$` + multiline), or use a token unlikely to appear in writing. Test with a fixture
+  that mentions the marker inline *and* uses it for real.
