@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { hasUnscannedActivity } from "./store";
+import { hasUnscannedActivity, titleMatchScore, tokenize } from "./store";
 import type { ConversationRow } from "./types";
 
 const tmpFiles: string[] = [];
@@ -33,6 +33,30 @@ afterAll(() => {
       /* ignore */
     }
   }
+});
+
+describe("titleMatchScore / tokenize (fuzzy completion matching)", () => {
+  const stored = "Build in-app basket optimizer (Basket feature)";
+
+  it("strips generic/stop words and short tokens", () => {
+    expect(tokenize("Build the basket feature for X")).toEqual(["basket"]);
+    expect(tokenize("Deploy to Render with monitoring")).toEqual(["deploy", "render", "monitoring"]);
+  });
+
+  it("scores a paraphrased completion ref as a full match (token containment)", () => {
+    expect(titleMatchScore("Basket feature", stored)).toBe(1);
+    expect(titleMatchScore("the basket", stored)).toBe(1);
+  });
+
+  it("scores an unrelated title near zero", () => {
+    expect(titleMatchScore("Generate recipes from pantry items", stored)).toBe(0);
+    expect(titleMatchScore("Publish til repo to GitHub", stored)).toBe(0);
+  });
+
+  it("does not over-match a partial/weaker reference above the accept threshold (0.7)", () => {
+    // {server, side, optimizer} ∩ {basket, optimizer} = 1 / min(3,2) = 0.5
+    expect(titleMatchScore("server-side optimizer", stored)).toBeLessThan(0.7);
+  });
 });
 
 describe("hasUnscannedActivity", () => {

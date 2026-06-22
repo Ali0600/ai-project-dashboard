@@ -129,7 +129,7 @@ export default function ProjectDashboard({
     return data;
   }
 
-  async function runScan(ids: number[]) {
+  async function runScan(ids: number[], opts: { full?: boolean } = {}) {
     if (ids.length === 0 || busy) return;
     setBusy(true);
     setSummary(null);
@@ -150,7 +150,11 @@ export default function ProjectDashboard({
     for (let i = 0; i < ids.length; i++) {
       step(i + 1, "Starting…");
       try {
-        const res = await fetch(`/api/conversations/${ids[i]}/scan`, { method: "POST" });
+        const res = await fetch(`/api/conversations/${ids[i]}/scan`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ full: opts.full ?? false }),
+        });
         const ctype = res.headers.get("content-type") || "";
         if (!res.body || !ctype.includes("ndjson")) {
           // Non-streaming fallback (e.g. a 404 JSON error).
@@ -235,22 +239,32 @@ export default function ProjectDashboard({
               : "All conversations scanned"}
           </div>
           {conversationIds.length > 0 && (
-            <button
-              onClick={() => runScan(pending.length > 0 ? pending : conversationIds)}
-              disabled={busy}
-              title={
-                pending.length > 0
-                  ? "Extract items from conversations with new activity"
-                  : "Re-scan all conversations for any new items"
-              }
-              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-            >
-              {busy
-                ? "Scanning…"
-                : pending.length > 0
-                  ? `Scan ${pending.length} pending`
-                  : "Rescan"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => runScan(conversationIds, { full: true })}
+                disabled={busy}
+                title="Re-read every conversation in full (ignore checkpoints) to catch completed tasks the incremental scan missed"
+                className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-black/5 disabled:opacity-60 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+              >
+                Full rescan
+              </button>
+              <button
+                onClick={() => runScan(pending.length > 0 ? pending : conversationIds)}
+                disabled={busy}
+                title={
+                  pending.length > 0
+                    ? "Extract items from conversations with new activity"
+                    : "Re-scan all conversations for any new items"
+                }
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {busy
+                  ? "Scanning…"
+                  : pending.length > 0
+                    ? `Scan ${pending.length} pending`
+                    : "Rescan"}
+              </button>
+            </div>
           )}
         </div>
       )}

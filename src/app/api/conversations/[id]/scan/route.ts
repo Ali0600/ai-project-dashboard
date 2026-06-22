@@ -12,10 +12,14 @@ export const maxDuration = 300; // headless extraction can take a while
  * `{phase:"extracting",index,total,detail?}`, `{phase:"ingesting"}`, then a terminal
  * `{phase:"result",...ScanResult}` or `{phase:"error",error}`.
  */
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const conv = getConversation(Number(id));
   if (!conv) return NextResponse.json({ error: "conversation not found" }, { status: 404 });
+
+  // `{ full: true }` re-reads the whole transcript (ignores the checkpoint) so completions that
+  // happened in already-scanned content can be reconciled against the current open items.
+  const body = (await req.json().catch(() => ({}))) as { full?: boolean };
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -23,7 +27,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       const send = (obj: unknown) => controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
       try {
         const result = await scanTranscript(conv.transcript_path, {
-          incremental: true,
+          incremental: !body.full,
           onProgress: send,
         });
         send({ phase: "result", ...result });

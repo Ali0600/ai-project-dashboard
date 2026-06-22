@@ -20,6 +20,33 @@ export function normalizeTitle(s: string): string {
     .trim();
 }
 
+// Generic words stripped before fuzzy title matching, so the meaningful nouns dominate.
+const STOP = new Set([
+  "the", "and", "for", "with", "via", "from", "into", "your", "build", "add", "make",
+  "create", "set", "use", "using", "app", "feature", "implement", "support", "new",
+]);
+
+/** Significant tokens of a title (lowercased, de-noised) — for fuzzy completion matching. */
+export function tokenize(s: string): string[] {
+  return normalizeTitle(s)
+    .split(" ")
+    .filter((t) => t.length > 2 && !STOP.has(t));
+}
+
+/**
+ * Containment similarity between a reference string and a candidate title: the share of the
+ * smaller token set that overlaps (1.0 when one set ⊆ the other). Lets a paraphrased "completed"
+ * reference ("basket feature") match a longer stored title ("Build in-app basket optimizer …").
+ */
+export function titleMatchScore(ref: string, candidate: string): number {
+  const a = new Set(tokenize(ref));
+  const b = new Set(tokenize(candidate));
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / Math.min(a.size, b.size);
+}
+
 function basename(p: string): string {
   const parts = p.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || p;
@@ -367,6 +394,29 @@ export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence
            ORDER BY id DESC LIMIT 1`,
       )
       .get(projectId, normalizeTitle(idOrTitle)) as ItemRow | undefined;
+  }
+  // Fuzzy fallback: the model often paraphrases the title it's marking complete. Match it to the
+  // best open item by token containment, but only when it's strong AND clearly unambiguous.
+  if (!row) {
+    const openItems = db
+      .prepare(
+        "SELECT * FROM items WHERE project_id = ? AND status IN ('todo','in_progress')",
+      )
+      .all(projectId) as ItemRow[];
+    let best: ItemRow | undefined;
+    let bestScore = 0;
+    let secondScore = 0;
+    for (const it of openItems) {
+      const s = titleMatchScore(idOrTitle, it.title);
+      if (s > bestScore) {
+        secondScore = bestScore;
+        bestScore = s;
+        best = it;
+      } else if (s > secondScore) {
+        secondScore = s;
+      }
+    }
+    if (best && bestScore >= 0.7 && bestScore - secondScore >= 0.2) row = best;
   }
   if (!row || row.status === "done" || row.status === "dismissed") return false;
   db.prepare(
