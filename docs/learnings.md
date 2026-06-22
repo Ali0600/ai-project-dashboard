@@ -215,3 +215,15 @@ and updates the UI live. No SSE/WebSocket needed; works over a normal `fetch` PO
   `curl -N` timestamps — set `cache-control: no-transform` to avoid proxy buffering).
 - **Takeaway:** for any operation longer than ~1–2s, stream coarse progress; a **per-step timer**
   (reset on each step) is the cheapest "is it stuck?" signal — a frozen number means trouble.
+
+## Kill dev servers by port, not by `pkill -f` on the command
+A stale server kept serving an old build, so verification screenshots showed pre-change behavior.
+`pkill -f "next start"` and `pkill -f "PORT=3100"` both missed it: the actual listener was a child
+`next-server` worker (different argv), and `PORT=3100` is an **environment variable, not part of the
+command line**, so `-f` never matches it. Two `next start` on one port also silently no-op the second
+(first keeps the socket), so you keep hitting the old one.
+- **Why it came up:** an opt-in/overview change looked broken in a CDP screenshot until I realized
+  the previous `npm start` was still bound to :3100 with the old bundle.
+- **Takeaway:** target the thing holding the socket — `lsof -ti tcp:3100 | xargs kill -9` — then
+  confirm the port is free before restarting. Env vars and child workers make name-based kills
+  unreliable; and when "the fix isn't showing," suspect a stale process before suspecting the code.
