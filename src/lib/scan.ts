@@ -61,6 +61,16 @@ export interface ScanResult {
   skipped: boolean;
 }
 
+/** A live step emitted during a scan (for streaming progress to the UI). */
+export interface ScanProgress {
+  phase: "reading" | "extracting" | "ingesting";
+  /** 1-based chunk number, for the "extracting" phase. */
+  index?: number;
+  total?: number;
+  /** e.g. "plan backlog" to mark the plan-derived chunks. */
+  detail?: string;
+}
+
 function sessionIdFromPath(p: string): string {
   return path.basename(p).replace(/\.jsonl$/, "");
 }
@@ -72,9 +82,10 @@ function sessionIdFromPath(p: string): string {
  */
 export async function scanTranscript(
   transcriptPath: string,
-  opts: { incremental?: boolean } = {},
+  opts: { incremental?: boolean; onProgress?: (p: ScanProgress) => void } = {},
 ): Promise<ScanResult> {
   const incremental = opts.incremental ?? true;
+  const report = opts.onProgress ?? (() => {});
   const existing = getConversationBySession(sessionIdFromPath(transcriptPath));
   const since = incremental ? existing?.last_scanned_uuid ?? null : null;
 
@@ -93,6 +104,7 @@ export async function scanTranscript(
     };
   }
 
+  report({ phase: "reading" });
   const { meta, text, lastUuid, empty, planRefs } = await readTranscript(transcriptPath, since);
 
   // No cwd means this isn't a real interactive project conversation (e.g. a headless
@@ -112,15 +124,23 @@ export async function scanTranscript(
     return { conversationId: conv.id, created: 0, flaggedDone: 0, createdIds: [], chunks: 0, skipped: true };
   }
 
-  const chunks = [...selectChunks(chunkText(text, CHUNK_CHARS), MAX_CHUNKS), ...planChunks];
+  const transcriptChunks = selectChunks(chunkText(text, CHUNK_CHARS), MAX_CHUNKS);
+  const chunks = [...transcriptChunks, ...planChunks];
 
   const existingTitles = openItemTitles(conv.project_id);
   const parts: ExtractionResult[] = [];
-  for (const ch of chunks) {
-    parts.push(await extractOnce(ch, existingTitles));
+  for (let i = 0; i < chunks.length; i++) {
+    report({
+      phase: "extracting",
+      index: i + 1,
+      total: chunks.length,
+      detail: i >= transcriptChunks.length ? "plan backlog" : undefined,
+    });
+    parts.push(await extractOnce(chunks[i], existingTitles));
   }
   const merged = mergeExtractions(parts);
 
+  report({ phase: "ingesting" });
   const res = ingestExtraction({
     projectId: conv.project_id,
     conversationId: conv.id,

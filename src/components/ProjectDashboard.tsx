@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AddTaskForm from "./AddTaskForm";
 import ItemDetail from "./ItemDetail";
 import ItemList from "./ItemList";
@@ -18,6 +18,30 @@ const KIND_NOUN: Record<ItemKind, string> = {
   suggestion: "suggestion",
   learning: "learning",
 };
+
+/** Current live scan step shown in the progress panel. */
+type ScanStep = {
+  convIndex: number;
+  convTotal: number;
+  label: string;
+  stepStart: number; // ms timestamp when this step began (for the elapsed timer)
+};
+
+/** Turn a streamed progress event into a human label. */
+function progressLabel(ev: { phase: string; index?: number; total?: number; detail?: string }): string {
+  switch (ev.phase) {
+    case "reading":
+      return "Reading transcript…";
+    case "extracting":
+      return ev.detail
+        ? `Reading ${ev.detail} ${ev.index}/${ev.total}…`
+        : `Extracting ${ev.index}/${ev.total}…`;
+    case "ingesting":
+      return "Saving…";
+    default:
+      return "Working…";
+  }
+}
 
 async function patch(id: number, body: Record<string, unknown>) {
   await fetch(`/api/items/${id}`, {
@@ -46,6 +70,15 @@ export default function ProjectDashboard({
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  // Live scan progress (streamed from the server); `now` ticks so the step timer updates.
+  const [scan, setScan] = useState<ScanStep | null>(null);
+  const [now, setNow] = useState(0);
+
+  useEffect(() => {
+    if (!scan) return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [scan]);
 
   /* --- mutations: optimistic local update + persist --- */
   function update(id: number, local: Partial<ItemWithSource>, body: Record<string, unknown>) {
@@ -103,23 +136,73 @@ export default function ProjectDashboard({
     const newIds: number[] = [];
     let flagged = 0;
     let error = "";
+
+    // Advance the live step; reset the timer only when the label/conversation actually changes.
+    const step = (convIndex: number, label: string) =>
+      setScan((prev) => ({
+        convIndex,
+        convTotal: ids.length,
+        label,
+        stepStart:
+          prev && prev.label === label && prev.convIndex === convIndex ? prev.stepStart : Date.now(),
+      }));
+
     for (let i = 0; i < ids.length; i++) {
-      setSummary(`Scanning ${i + 1}/${ids.length}…`);
+      step(i + 1, "Starting…");
       try {
         const res = await fetch(`/api/conversations/${ids[i]}/scan`, { method: "POST" });
-        const json = await res.json();
-        if (!res.ok) error = json.error || "scan failed";
-        else {
-          if (Array.isArray(json.createdIds)) newIds.push(...json.createdIds);
-          flagged += json.flaggedDone ?? 0;
+        const ctype = res.headers.get("content-type") || "";
+        if (!res.body || !ctype.includes("ndjson")) {
+          // Non-streaming fallback (e.g. a 404 JSON error).
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) error = json.error || "scan failed";
+          continue;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            let ev: {
+              phase: string;
+              index?: number;
+              total?: number;
+              detail?: string;
+              error?: string;
+              createdIds?: number[];
+              flaggedDone?: number;
+            };
+            try {
+              ev = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            if (ev.phase === "result") {
+              if (Array.isArray(ev.createdIds)) newIds.push(...ev.createdIds);
+              flagged += ev.flaggedDone ?? 0;
+            } else if (ev.phase === "error") {
+              error = ev.error || "scan failed";
+            } else {
+              step(i + 1, progressLabel(ev));
+            }
+          }
         }
       } catch {
         error = "scan request failed";
       }
     }
+
     const fresh = await refetch();
     setRecentlyAdded(new Set(newIds));
     setPending([]);
+    setScan(null);
     setBusy(false);
     setSummary(error ? `Scan error: ${error}` : buildSummary(fresh, newIds, flagged));
   }
@@ -163,12 +246,28 @@ export default function ProjectDashboard({
               className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
             >
               {busy
-                ? summary || "Scanning…"
+                ? "Scanning…"
                 : pending.length > 0
                   ? `Scan ${pending.length} pending`
                   : "Rescan"}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Live scan progress (streamed step-by-step) */}
+      {busy && scan && (
+        <div className="mb-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm dark:border-indigo-500/30 dark:bg-indigo-500/10">
+          <div className="flex items-center gap-2 font-medium text-indigo-800 dark:text-indigo-300">
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+            Scanning conversation {scan.convIndex}/{scan.convTotal}
+          </div>
+          <div className="mt-1 flex items-center gap-2 pl-[1.375rem] text-indigo-700/80 dark:text-indigo-300/80">
+            <span>{scan.label}</span>
+            <span className="tabular-nums text-xs text-indigo-600/70 dark:text-indigo-300/60">
+              {Math.max(0, Math.round((now - scan.stepStart) / 1000))}s
+            </span>
+          </div>
         </div>
       )}
 
