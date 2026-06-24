@@ -227,6 +227,7 @@ export default function ProjectDashboard({
     items.filter((i) => i.kind === kind && i.status !== "dismissed");
   const isError = summary?.startsWith("Scan error");
   const selected = selectedId != null ? items.find((i) => i.id === selectedId) ?? null : null;
+  const dismissed = items.filter((i) => i.status === "dismissed");
 
   return (
     <div>
@@ -369,6 +370,37 @@ export default function ProjectDashboard({
           onOpenDetail={setSelectedId}
           onPromote={promote}
         />
+      )}
+
+      {/* Dismissed items — tombstoned (won't reappear on a scan) but restorable here. */}
+      {dismissed.length > 0 && (
+        <details className="mt-6 text-sm">
+          <summary className="cursor-pointer text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+            Dismissed ({dismissed.length})
+          </summary>
+          <ul className="mt-2 flex flex-col gap-1">
+            {dismissed.map((it) => (
+              <li
+                key={it.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-black/10 px-3 py-2 dark:border-white/10"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 rounded bg-black/10 px-1.5 py-0.5 text-[10px] capitalize text-zinc-500 dark:bg-white/10">
+                    {KIND_NOUN[it.kind]}
+                  </span>
+                  <span className="truncate text-zinc-500 line-through">{it.title}</span>
+                </span>
+                <button
+                  onClick={() => setStatus(it.id, "todo")}
+                  title="Restore this item (move back to To Do)"
+                  className="shrink-0 rounded-lg border border-black/15 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-black/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+                >
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       <ItemDetail
