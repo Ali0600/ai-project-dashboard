@@ -66,15 +66,18 @@ export function titleJaccard(a: string, b: string): { score: number; shared: num
 /** Minimum Jaccard + shared tokens for two titles to count as the same item (reworded). */
 const DEDUP_JACCARD = 0.6;
 
-/** Find an existing same-kind item that is a reworded duplicate of `title` (any status). */
+/** Find an existing item (of any of `kinds`, any status) that is a reworded duplicate of `title`. */
 export function findFuzzyDuplicate(
   projectId: number,
-  kind: ItemKind,
+  kinds: ItemKind | ItemKind[],
   title: string,
 ): ItemRow | undefined {
+  const list = Array.isArray(kinds) ? kinds : [kinds];
+  if (list.length === 0) return undefined;
+  const placeholders = list.map(() => "?").join(",");
   const items = getDb()
-    .prepare("SELECT * FROM items WHERE project_id = ? AND kind = ?")
-    .all(projectId, kind) as ItemRow[];
+    .prepare(`SELECT * FROM items WHERE project_id = ? AND kind IN (${placeholders})`)
+    .all(projectId, ...list) as ItemRow[];
   let best: ItemRow | undefined;
   let bestScore = 0;
   for (const it of items) {
@@ -303,11 +306,12 @@ export function insertItem(a: InsertItemArgs): number | null {
   // existing, non-dismissed task is redundant — skip it. Same-kind dups are handled by the
   // UNIQUE(project_id, kind, norm_key) constraint below.
   if (a.kind === "suggestion" && taskExistsWithKey(a.projectId, normKey)) return null;
-  // Fuzzy same-kind dedup for actionable items: a reworded version of an existing task/suggestion
-  // (any status — incl. done/dismissed) shouldn't reappear as a new row on a re-scan.
-  if ((a.kind === "task" || a.kind === "suggestion") && findFuzzyDuplicate(a.projectId, a.kind, a.title)) {
-    return null;
-  }
+  // Fuzzy dedup for actionable items (any status — incl. done/dismissed) so a reworded version
+  // doesn't reappear on a re-scan. A suggestion also dedups against TASKS (precedence task >
+  // suggestion), so "add EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task.
+  const dupKinds: ItemKind[] | null =
+    a.kind === "suggestion" ? ["task", "suggestion"] : a.kind === "task" ? ["task"] : null;
+  if (dupKinds && findFuzzyDuplicate(a.projectId, dupKinds, a.title)) return null;
 
   const info = db
     .prepare(
@@ -339,18 +343,34 @@ export function taskExistsWithKey(projectId: number, normKey: string): boolean {
     .get(projectId, normKey);
 }
 
-/** Retire suggestions that duplicate an existing task (run after ingesting tasks). Returns count. */
+/**
+ * Retire suggestions that duplicate an existing (non-dismissed) task — exact OR reworded (fuzzy).
+ * Run after ingesting tasks. Returns the number dismissed.
+ */
 export function dismissSuggestionsCollidingWithTasks(projectId: number): number {
-  return getDb()
-    .prepare(
-      `UPDATE items SET status = 'dismissed', updated_at = datetime('now')
-         WHERE project_id = ? AND kind = 'suggestion' AND status != 'dismissed'
-           AND EXISTS (
-             SELECT 1 FROM items t
-               WHERE t.project_id = items.project_id AND t.kind = 'task' AND t.norm_key = items.norm_key
-           )`,
-    )
-    .run(projectId).changes;
+  const db = getDb();
+  const tasks = db
+    .prepare("SELECT title FROM items WHERE project_id = ? AND kind = 'task' AND status != 'dismissed'")
+    .all(projectId) as { title: string }[];
+  if (tasks.length === 0) return 0;
+  const suggestions = db
+    .prepare("SELECT id, title FROM items WHERE project_id = ? AND kind = 'suggestion' AND status != 'dismissed'")
+    .all(projectId) as { id: number; title: string }[];
+  const dismiss = db.prepare(
+    "UPDATE items SET status = 'dismissed', updated_at = datetime('now') WHERE id = ?",
+  );
+  let n = 0;
+  for (const s of suggestions) {
+    const dup = tasks.some((t) => {
+      const { score, shared } = titleJaccard(s.title, t.title);
+      return shared >= 2 && score >= DEDUP_JACCARD;
+    });
+    if (dup) {
+      dismiss.run(s.id);
+      n++;
+    }
+  }
+  return n;
 }
 
 /**
