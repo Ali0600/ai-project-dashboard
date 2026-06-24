@@ -247,6 +247,7 @@ the other), after dropping generic stop-words — and only accept a hit that's b
   short task isn't swallowed by a longer superset. Containment for dedup over-matches ("Deploy to
   Render" ⊆ "Enable gated Render deploy via hook"); Jaccard keeps them distinct.
 - **Takeaway:** any LLM-extraction-into-DB flow that links model output to existing rows should
-  fuzzy-match — containment for ref→record, Jaccard for dedup — and dedup must check rows of **every
-  status** (done/dismissed too), or a re-scan recreates a finished item under new wording. Offer a
+  fuzzy-match — containment for ref→record, Jaccard for dedup — and dedup must span **every status**
+  (done/dismissed too) **and every overlapping kind** (e.g. a "suggestion" can be a reworded copy of
+  a "task"); a within-one-bucket dedup silently lets the dup back in via another bucket. Offer a
   "reprocess everything" path, since incremental passes only ever see each piece of content once.
