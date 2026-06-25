@@ -39,5 +39,8 @@ Steps:
      npx tsx scripts/ingest-cli.ts --cwd "<PWD>" --file /tmp/sync-board.json
    ```
 
+   Items auto-link to the current conversation (resolved from the newest transcript matching
+   `<PWD>`), so they show "From <title> · <date>" on the board — no extra flag needed.
+
 5. Report a short summary of what was added (counts per category) and remind me I can
    view it by running `npm run dev` in the dashboard (http://localhost:3000).

@@ -112,4 +112,16 @@ function migrate(db: Database.Database): void {
             WHERE t.project_id = items.project_id AND t.kind = 'task' AND t.norm_key = items.norm_key
         );
   `);
+
+  // Completion is task-only: clear any `suggested_done` flag that landed on a learning/suggestion
+  // (a pre-fix `flagSuggestedDone` matched references across all kinds). No-op once data is clean.
+  db.exec(
+    `UPDATE items SET suggested_done = 0, done_evidence = NULL WHERE suggested_done = 1 AND kind <> 'task';`,
+  );
+
+  // Backfill blank conversation titles (legacy/empty rows) so source lines and any future
+  // per-conversation filter aren't empty. New titles come from the scan path going forward.
+  db.exec(
+    `UPDATE conversations SET title = COALESCE(NULLIF(slug, ''), session_id) WHERE title IS NULL OR title = '';`,
+  );
 }

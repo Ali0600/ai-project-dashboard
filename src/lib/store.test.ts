@@ -2,10 +2,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { hasUnscannedActivity, titleJaccard, titleMatchScore, tokenize } from "./store";
+import {
+  flagSuggestedDone,
+  getOrCreateProject,
+  hasUnscannedActivity,
+  insertItem,
+  listItems,
+  titleJaccard,
+  titleMatchScore,
+  tokenize,
+} from "./store";
 import type { ConversationRow } from "./types";
 
-const tmpFiles: string[] = [];
+// Point the DB at a throwaway file before any store fn opens it (getDb is lazy + memoized, and is
+// only called inside the DB-backed test bodies below), so tests never touch the live dashboard.db.
+const testDbPath = path.join(os.tmpdir(), `store-test-${Math.random().toString(36).slice(2)}.db`);
+process.env.DASHBOARD_DB = testDbPath;
+
+const tmpFiles: string[] = [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`];
 
 function writeTmp(mtime?: Date): string {
   const p = path.join(os.tmpdir(), `conv-test-${Math.random().toString(36).slice(2)}.jsonl`);
@@ -107,5 +121,40 @@ describe("hasUnscannedActivity", () => {
       last_scanned_at: "2030-01-01 00:00:00", // scanned in the future
     });
     expect(hasUnscannedActivity(c)).toBe(false);
+  });
+});
+
+describe("flagSuggestedDone is task-only (completion can't land on a learning/suggestion)", () => {
+  it("flags a matching task but never a learning/suggestion", () => {
+    const p = getOrCreateProject("/tmp/store-test-flag");
+    insertItem({ projectId: p.id, kind: "task", title: "Deploy to Render" });
+    insertItem({ projectId: p.id, kind: "learning", title: "Stream large files with readline" });
+    insertItem({ projectId: p.id, kind: "suggestion", title: "Pin the GitHub repo" });
+
+    // A completion reference whose words match only a learning/suggestion must NOT flag anything.
+    expect(flagSuggestedDone(p.id, "Stream large files with readline", "ev")).toBe(false);
+    expect(flagSuggestedDone(p.id, "Pin the GitHub repo", "ev")).toBe(false);
+    // The task is still flaggable.
+    expect(flagSuggestedDone(p.id, "Deploy to Render", "ev")).toBe(true);
+
+    const flagged = listItems(p.id).filter((i) => i.suggested_done === 1);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].kind).toBe("task");
+  });
+});
+
+describe("insertItem fuzzy-dedups learnings (only against other learnings)", () => {
+  it("drops a reworded learning but keeps one that only overlaps a task", () => {
+    const p = getOrCreateProject("/tmp/store-test-learn-dedup");
+    const first = insertItem({ projectId: p.id, kind: "learning", title: "Stream large files with readline" });
+    expect(first).not.toBeNull();
+    // Same token set, reworded → deduped.
+    const reworded = insertItem({ projectId: p.id, kind: "learning", title: "Stream large files using readline" });
+    expect(reworded).toBeNull();
+
+    // A learning that shares all its tokens with a TASK is NOT deduped (cross-kind isolation).
+    insertItem({ projectId: p.id, kind: "task", title: "Configure CI caching" });
+    const learning = insertItem({ projectId: p.id, kind: "learning", title: "Configure CI caching" });
+    expect(learning).not.toBeNull();
   });
 });

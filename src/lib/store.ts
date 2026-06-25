@@ -306,11 +306,18 @@ export function insertItem(a: InsertItemArgs): number | null {
   // existing, non-dismissed task is redundant — skip it. Same-kind dups are handled by the
   // UNIQUE(project_id, kind, norm_key) constraint below.
   if (a.kind === "suggestion" && taskExistsWithKey(a.projectId, normKey)) return null;
-  // Fuzzy dedup for actionable items (any status — incl. done/dismissed) so a reworded version
-  // doesn't reappear on a re-scan. A suggestion also dedups against TASKS (precedence task >
-  // suggestion), so "add EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task.
+  // Fuzzy dedup (any status — incl. done/dismissed) so a reworded version doesn't reappear on a
+  // re-scan. A suggestion also dedups against TASKS (precedence task > suggestion), so "add
+  // EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task. Learnings dedup
+  // only against other learnings — a learning can legitimately share wording with a task.
   const dupKinds: ItemKind[] | null =
-    a.kind === "suggestion" ? ["task", "suggestion"] : a.kind === "task" ? ["task"] : null;
+    a.kind === "suggestion"
+      ? ["task", "suggestion"]
+      : a.kind === "task"
+        ? ["task"]
+        : a.kind === "learning"
+          ? ["learning"]
+          : null;
   if (dupKinds && findFuzzyDuplicate(a.projectId, dupKinds, a.title)) return null;
 
   const info = db
@@ -445,8 +452,10 @@ export function saveImplementationPlan(id: number, plan: string): void {
 export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence: string): boolean {
   const db = getDb();
   let row: ItemRow | undefined;
+  // Completion ("Looks done?") is a task-only concept — a learning or suggestion can't be "done".
+  // Scope every lookup to kind='task' so a `completed[]` reference can't flag a non-task row.
   if (/^\d+$/.test(idOrTitle)) {
-    row = db.prepare("SELECT * FROM items WHERE id = ? AND project_id = ?").get(
+    row = db.prepare("SELECT * FROM items WHERE id = ? AND project_id = ? AND kind = 'task'").get(
       Number(idOrTitle),
       projectId,
     ) as ItemRow | undefined;
@@ -455,17 +464,17 @@ export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence
     row = db
       .prepare(
         `SELECT * FROM items
-           WHERE project_id = ? AND norm_key = ? AND status IN ('todo','in_progress')
+           WHERE project_id = ? AND kind = 'task' AND norm_key = ? AND status IN ('todo','in_progress')
            ORDER BY id DESC LIMIT 1`,
       )
       .get(projectId, normalizeTitle(idOrTitle)) as ItemRow | undefined;
   }
   // Fuzzy fallback: the model often paraphrases the title it's marking complete. Match it to the
-  // best open item by token containment, but only when it's strong AND clearly unambiguous.
+  // best open task by token containment, but only when it's strong AND clearly unambiguous.
   if (!row) {
     const openItems = db
       .prepare(
-        "SELECT * FROM items WHERE project_id = ? AND status IN ('todo','in_progress')",
+        "SELECT * FROM items WHERE project_id = ? AND kind = 'task' AND status IN ('todo','in_progress')",
       )
       .all(projectId) as ItemRow[];
     let best: ItemRow | undefined;
