@@ -267,6 +267,30 @@ parent happened to be launched*, which is invisible and non-reproducible.
   drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
   parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
 
+## Single-table polymorphism: every kind-specific operation must filter by `kind`
+When one table holds several "kinds" of row (`items.kind = task|suggestion|learning`), a query that
+implements behaviour meaningful for only **one** kind must say `WHERE kind = '…'`. Omit it and the
+operation silently leaks across kinds — no error, just wrong rows.
+- **Why it came up:** `flagSuggestedDone` (the "Looks done?" completion flow, a task-only concept)
+  had no `kind` filter in any of its 3 lookups, so the model's `completed[]` references matched
+  learnings/suggestions too — a live-DB audit found **21 learnings + 7 suggestions** wrongly carrying
+  `suggested_done=1`. The bug was invisible in code review but obvious as a data distribution.
+- **Takeaway:** in a single-table/`kind`-column schema, audit `SELECT kind, COUNT(*) … GROUP BY kind`
+  on the real data — a kind that shouldn't appear in a result set is a missing scope predicate. Add
+  the `kind` filter to *every* kind-specific read/write, not just the obvious one.
+
+## Resolve "the current thing" from filesystem state, not a passed-in id
+A CLI/command that runs *inside* a live context often can't easily get its own id (here, the
+`/sync-board` slash command doesn't know its Claude session id), so work it produces ends up
+unattributed. The live session's transcript is simply the **most-recently-modified** file under the
+projects dir — pick the newest whose embedded `cwd` matches, and you've found "now" without an id.
+- **Why it came up:** `/sync-board` ingested items with `conversation_id = NULL` (90 orphans, all
+  showing "Added via /sync-board") because `ingest-cli` only linked a conversation when given an
+  explicit `--session`. Resolving the newest matching transcript links them to the real conversation.
+- **Takeaway:** when the caller can't name the active entity, derive it from a filesystem signal
+  (newest mtime + an embedded identity field like `cwd`) rather than leaving the link empty — same
+  "compute liveness from the filesystem" instinct as the needs-scan mtime check.
+
 ## Event-driven capture should be opt-in/scoped, not capture-everything
 An automation that fires on a generic lifecycle event (here, a global `SessionEnd` hook) captures *all*
 of the user's activity, not just what they care about — flooding the system with noise.
