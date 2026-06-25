@@ -158,7 +158,10 @@ programmatic `element.click()` may not trigger React handlers on a dnd-kit dragg
 - **Why it came up:** the preview server and the Chrome extension were unavailable, but I needed to
   *prove* the Scan button updated the board in place — measured 4→3 cards with `navigations:1` (no reload).
 - **Takeaway:** CDP + Node's global `WebSocket` is a zero-dependency way to script a real browser for
-  verification; click via `Input.dispatchMouseEvent`, not `.click()`, when synthetic events get swallowed.
+  verification. For ordinary buttons prefer `element.click()` (scroll-independent); reserve
+  `Input.dispatchMouseEvent` for elements that swallow synthetic events (dnd-kit draggables) — and
+  remember coordinate clicks miss anything **below the fold**, so `scrollIntoView()` first (a
+  bottom-of-page "Restore" button silently no-op'd until I switched to `element.click()`).
 
 ## Long-running processes freeze their auth env at launch
 A process captures a snapshot of environment variables when it starts. If those include a
@@ -251,3 +254,25 @@ the other), after dropping generic stop-words — and only accept a hit that's b
   (done/dismissed too) **and every overlapping kind** (e.g. a "suggestion" can be a reworded copy of
   a "task"); a within-one-bucket dedup silently lets the dup back in via another bucket. Offer a
   "reprocess everything" path, since incremental passes only ever see each piece of content once.
+
+## Build a clean env for spawned subprocesses; don't forward `...process.env` blindly
+A child process inherits whatever's in the parent's environment — including ambient credentials/config
+that can silently override its intended behaviour (an expired `ANTHROPIC_*` token, a proxy `*_BASE_URL`,
+`NODE_OPTIONS`). Passing `{ ...process.env }` to `spawn` makes the child's behaviour depend on *how the
+parent happened to be launched*, which is invisible and non-reproducible.
+- **Why it came up:** the dashboard's headless `claude -p` inherited an expired token from the shell
+  that started the dev server and 401'd; the fix (`DASHBOARD_FORCE_SUBSCRIPTION_AUTH`) strips inherited
+  `ANTHROPIC_*` from the child env so the CLI falls back to its own persistent login.
+- **Takeaway:** when you spawn a tool that has its *own* auth/config source, curate the child env —
+  drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
+  parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
+
+## Event-driven capture should be opt-in/scoped, not capture-everything
+An automation that fires on a generic lifecycle event (here, a global `SessionEnd` hook) captures *all*
+of the user's activity, not just what they care about — flooding the system with noise.
+- **Why it came up:** the hook turned **every** folder the user ran `claude` in (including `/tmp`) into
+  a dashboard "project"; the fix was to only flag sessions whose `cwd` is **already** a tracked project
+  (enrolled explicitly via `/sync-board` or backfill), and to collapse empty ones in the UI.
+- **Takeaway:** make broad event-driven capture opt-in — act only on entities the user has explicitly
+  enrolled (allowlist / "already known") and filter transient/system sources — rather than capturing
+  everything and making the user prune. This is the complement of "don't capture your own subprocesses."
