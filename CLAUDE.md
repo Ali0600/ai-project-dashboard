@@ -19,8 +19,9 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   `priority.ts` (zod-free priority consts), `format.ts` (deterministic dates), `types.ts` (zod
   contract + row types; re-exports priority).
 - `src/app/api/` — `items` (POST create), `items/[id]` (PATCH: status / priority / promote / confirm /
-  dismiss), `items/[id]/implement` (POST: draft plan), `projects/[id]/items` (GET: client refetch),
-  `conversations/[id]/scan` (POST: streams NDJSON progress; `{full:true}` = full re-read).
+  dismiss), `items/[id]/implement` (POST: draft read-only plan), `items/[id]/apply` (POST: apply on a
+  branch), `projects/[id]` (DELETE: remove project + cascade), `projects/[id]/items` (GET: client
+  refetch), `conversations/[id]/scan` (POST: streams NDJSON progress; `{full:true}` = full re-read).
 - `src/app/` pages are server components reading the DB directly (`force-dynamic`).
   `src/components/` — `ProjectDashboard` owns all item state; `KanbanBoard` / `ItemList` /
   `ItemDetail` (modal) are controlled; plus `PriorityPill`, `AddTaskForm`, `SourceLine`, `CopyButton`.
@@ -57,6 +58,15 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   (both call `getOrCreateProject`). `flag-hook` only flags sessions whose `cwd` is **already** a
   project (`getProjectByCwd`), so one-off sessions never auto-create projects. The overview
   (`page.tsx`) shows projects with `total_items > 0` and collapses empty ones into a `<details>`.
+- **Implement vs Apply-on-branch** (tasks only, `claude.ts`): `implementPlan` resumes the source
+  conversation **read-only** (`--disallowed-tools`) to draft a plan. `applyPlanOnBranch` runs the agent
+  with edits ENABLED but **bounded** — `--permission-mode acceptEdits` + Bash/network disallowed, inside
+  an **isolated `git worktree` + `dashboard/apply-*` branch** of the task's project (runs *fresh*, not
+  `--resume`, so file ops can't escape the worktree), captures the diff, commits it, removes the temp
+  worktree (branch persists). **Never pushes/PRs** — that stays manual. Diff stored in `apply_diff`.
+- **Collapse near-dup tasks**: `collapseDuplicateTasks(projectId)` runs in `ingestExtraction` after the
+  task inserts (alongside `dismissSuggestionsCollidingWithTasks`); keeps one canonical (prefers `done`),
+  dismisses the rest — so pre-fuzzy-dedup dups heal on the next scan.
 - Priority is stored as an INTEGER rank (1=urgent…4=low); consts live in `priority.ts` (no zod).
 - Pass a stable `useId()` to `<DndContext id=…>` (avoids hydration mismatch); format dates via
   `lib/format.ts` (locale-free) for the same reason.

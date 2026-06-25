@@ -43,6 +43,9 @@ don't get lost.
   highest-first; shipped behind a guarded, idempotent SQLite column migration over a live DB.
 - **Agentic "Implement"** — drafts an implementation plan by resuming a task's *source* conversation
   (`claude -p --resume`) read-only (edit/shell tools disabled), so the plan has full context.
+- **"Apply on a branch"** — runs the agent with edits enabled but **sandboxed**: an isolated
+  `git worktree` + `dashboard/apply-*` branch, `acceptEdits` with shell/network disabled, the diff
+  captured and committed for review. The main checkout is never touched and nothing is pushed.
 - **Tested & CI-gated** — Vitest unit tests for the streaming transcript parser; GitHub Actions runs
   typecheck · lint · test · build on every push.
 
@@ -117,6 +120,7 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `CLAUDE_MAX_BUDGET_USD` | `0.25` | Per-call spend cap for extraction `claude -p` |
 | `CLAUDE_IMPLEMENT_MODEL` | `sonnet` | Model for the "Implement" plan run |
 | `CLAUDE_IMPLEMENT_BUDGET_USD` | `0.50` | Per-call spend cap for "Implement" |
+| `CLAUDE_APPLY_BUDGET_USD` | `1.00` | Per-call spend cap for "Apply on a branch" (edits enabled) |
 | `CHUNK_CHARS` | `120000` | Max characters per extraction chunk |
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 | `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |
