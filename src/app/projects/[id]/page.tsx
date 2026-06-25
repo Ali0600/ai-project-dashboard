@@ -2,7 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import DeleteProjectButton from "@/components/DeleteProjectButton";
 import ProjectDashboard from "@/components/ProjectDashboard";
-import { getProject, hasUnscannedActivity, listConversations, listItemsWithSource } from "@/lib/store";
+import {
+  deriveResearchTopic,
+  getProject,
+  hasUnscannedActivity,
+  listConversations,
+  listItemsWithSource,
+} from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +48,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         projectId={project.id}
         conversationIds={conversations.map((c) => c.id)}
         pendingConversationIds={pendingIds}
+        derivedTopic={deriveResearchTopic(project.id)}
       />
     </div>
   );

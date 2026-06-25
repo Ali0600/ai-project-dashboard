@@ -51,6 +51,7 @@ export default function AddTaskForm({
         done_evidence: null,
         source_uuid: null,
         source_quote: null,
+        source_url: null,
         implementation_plan: null,
         apply_branch: null,
         apply_diff: null,

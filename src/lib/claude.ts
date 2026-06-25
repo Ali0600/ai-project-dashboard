@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { ExtractionResult, PRIORITIES, type Priority } from "./types";
+import { ExtractionResult, PRIORITIES, type Priority, ResearchResult, type ResearchIdea } from "./types";
 
 const MODEL = process.env.CLAUDE_EXTRACT_MODEL || "haiku";
 const MAX_BUDGET = process.env.CLAUDE_MAX_BUDGET_USD || "0.25";
@@ -9,6 +9,8 @@ const IMPLEMENT_MODEL = process.env.CLAUDE_IMPLEMENT_MODEL || "sonnet";
 const IMPLEMENT_BUDGET = process.env.CLAUDE_IMPLEMENT_BUDGET_USD || "0.50";
 const APPLY_BUDGET = process.env.CLAUDE_APPLY_BUDGET_USD || "1.00";
 const APPLY_DIFF_MAX = 20_000; // cap the diff stored/returned so a huge change doesn't bloat the payload
+const RESEARCH_MODEL = process.env.CLAUDE_RESEARCH_MODEL || "sonnet"; // web research + synthesis wants a capable model
+const RESEARCH_BUDGET = process.env.CLAUDE_RESEARCH_BUDGET_USD || "0.50";
 
 export class ClaudeUnavailableError extends Error {}
 
@@ -384,6 +386,72 @@ When done, briefly summarize what you changed (the key files and the gist).`;
     await git(["branch", "-D", branch], repoRoot).catch(() => {});
     throw e;
   }
+}
+
+/**
+ * Research the web for features/tasks people are ASKING FOR in a project like `topic`. Runs headless
+ * `claude -p` with WebSearch + WebFetch ENABLED (and edit/shell tools disabled, so it can only read
+ * the web — it can't act on anything it finds). Returns deduped idea candidates, each with a source
+ * URL. Retries once on malformed JSON (mirrors extractOnce). Empty array if nothing is found.
+ */
+export async function researchFeatures(opts: {
+  topic: string;
+  existingTitles: string[];
+}): Promise<ResearchIdea[]> {
+  const existing =
+    opts.existingTitles.length > 0 ? opts.existingTitles.map((t) => `- ${t}`).join("\n") : "(none)";
+  const base = `You research what features, improvements, and tasks PEOPLE ARE ASKING FOR in projects like the one described below. Use the WebSearch and WebFetch tools to check real, recent sources — Reddit, forums, Product Hunt, Hacker News, GitHub issues, blog posts. Find concrete, frequently-requested ideas (pain points, "I wish it could…", feature requests), not generic advice.
+
+PROJECT: ${opts.topic}
+
+Return ONLY a JSON object (no prose, no markdown fences) with this exact shape:
+{"ideas":[{"title": string, "detail": string, "source_url": string, "source_quote": string}]}
+
+Rules:
+- Each idea MUST have a real source_url you actually visited (the page where people ask for it).
+- title: short and actionable (max ~10 words). detail: 1-2 sentences of context. source_quote: a SHORT paraphrase of what was requested (max ~100 chars, no double-quotes or newlines).
+- Do NOT include anything already in EXISTING ITEMS below. Prefer ideas requested by multiple people.
+- If you genuinely find nothing concrete, return {"ideas":[]}. Never invent ideas or URLs.
+
+=== EXISTING ITEMS (do not duplicate) ===
+${existing}
+
+Return the JSON object now.`;
+
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--model",
+    RESEARCH_MODEL,
+    "--max-budget-usd",
+    RESEARCH_BUDGET,
+    // Web access ON; edits/shell OFF so the agent can only read the web, never act on it.
+    "--allowed-tools",
+    "WebSearch WebFetch Read",
+    "--disallowed-tools",
+    "Write Edit MultiEdit NotebookEdit Bash",
+    "--no-session-persistence",
+  ];
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const prompt =
+      attempt === 0
+        ? base
+        : `${base}\n\nYour previous response was not valid JSON. Return ONLY a single line of valid, minified JSON with all quotes escaped and no newlines inside strings.`;
+    const envelope = JSON.parse(await spawnClaude(args, { input: prompt }));
+    if (envelope.is_error || envelope.subtype !== "success") {
+      lastErr = new Error(`Claude research failed: ${envelope.subtype || "unknown error"}`);
+      continue;
+    }
+    try {
+      return ResearchResult.parse(extractJsonObject(String(envelope.result ?? ""))).ideas;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("research failed");
 }
 
 /** Merge several chunk extractions into one (DB handles final de-duplication). */

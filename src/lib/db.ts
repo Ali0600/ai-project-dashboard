@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS items (
   done_evidence   TEXT,
   source_uuid     TEXT,
   source_quote    TEXT,
+  source_url      TEXT,
   implementation_plan TEXT,
   apply_branch    TEXT,
   apply_diff      TEXT,
@@ -95,6 +96,7 @@ function migrate(db: Database.Database): void {
   ensure("implementation_plan", "implementation_plan TEXT");
   ensure("apply_branch", "apply_branch TEXT");
   ensure("apply_diff", "apply_diff TEXT");
+  ensure("source_url", "source_url TEXT");
 
   // One-time consolidation: merge legacy `recommendation` + `next_step` into a single
   // `suggestion` kind. Idempotent — after the first run there are no legacy-kind rows left,

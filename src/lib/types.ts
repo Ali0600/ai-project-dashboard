@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** The kinds of things we pull out of a conversation. */
-export const ITEM_KINDS = ["task", "suggestion", "learning"] as const;
+/** The kinds of things we track. `research` items come from the web-research flow, not transcripts. */
+export const ITEM_KINDS = ["task", "suggestion", "learning", "research"] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
 export const ITEM_STATUSES = ["todo", "in_progress", "done", "dismissed"] as const;
@@ -56,6 +56,24 @@ export const ExtractionResult = z
 export type ExtractionResult = z.infer<typeof ExtractionResult>;
 
 /* ----------------------------------------------------------------------------
+ * Web-research contract — the JSON shape the web-research `claude -p` returns.
+ * Lenient (defaults everywhere) so a partial model response still ingests.
+ * ------------------------------------------------------------------------- */
+
+const ResearchIdea = z.object({
+  title: z.string().min(1),
+  detail: z.string().optional().default(""),
+  source_url: z.string().optional().default(""),
+  source_quote: z.string().optional().default(""),
+});
+export type ResearchIdea = z.infer<typeof ResearchIdea>;
+
+export const ResearchResult = z.object({
+  ideas: z.array(ResearchIdea).optional().default([]),
+});
+export type ResearchResult = z.infer<typeof ResearchResult>;
+
+/* ----------------------------------------------------------------------------
  * Row shapes (as stored in SQLite).
  * ------------------------------------------------------------------------- */
 
@@ -93,6 +111,7 @@ export interface ItemRow {
   done_evidence: string | null;
   source_uuid: string | null;
   source_quote: string | null;
+  source_url: string | null;
   implementation_plan: string | null;
   apply_branch: string | null;
   apply_diff: string | null;

@@ -162,6 +162,32 @@ describe("insertItem fuzzy-dedups learnings (only against other learnings)", () 
   });
 });
 
+describe("insertItem research kind", () => {
+  it("persists source_url and dedups against existing tasks/suggestions", () => {
+    const p = getOrCreateProject("/tmp/store-test-research");
+    // A research idea that duplicates an existing task is dropped (don't resurface tracked work).
+    insertItem({ projectId: p.id, kind: "task", title: "Add barcode scanner to app" });
+    const dup = insertItem({
+      projectId: p.id,
+      kind: "research",
+      title: "Add barcode scanner",
+      sourceUrl: "https://reddit.com/r/x/1",
+    });
+    expect(dup).toBeNull();
+
+    // A genuinely new research idea is inserted with its source_url.
+    const id = insertItem({
+      projectId: p.id,
+      kind: "research",
+      title: "Offline receipt history",
+      sourceUrl: "https://news.ycombinator.com/item?id=1",
+    });
+    expect(id).not.toBeNull();
+    const row = listItems(p.id, "research").find((i) => i.id === id);
+    expect(row?.source_url).toBe("https://news.ycombinator.com/item?id=1");
+  });
+});
+
 describe("collapseDuplicateTasks", () => {
   it("dismisses a reworded duplicate task, keeping the done canonical; leaves distinct tasks", () => {
     const p = getOrCreateProject("/tmp/store-test-collapse");

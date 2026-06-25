@@ -170,7 +170,17 @@ export default function ItemDetail({
         {/* Source */}
         <div className="mt-4 border-t border-black/10 pt-3 dark:border-white/10">
           <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Source</p>
-          {item.conversation_title ? (
+          {item.source_url ? (
+            <a
+              href={item.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block truncate text-sm text-indigo-600 hover:underline dark:text-indigo-400"
+              title={item.source_url}
+            >
+              🌐 {item.source_url}
+            </a>
+          ) : item.conversation_title ? (
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
               {item.conversation_title}
               {item.conversation_at ? ` · ${formatDate(item.conversation_at)}` : ""}

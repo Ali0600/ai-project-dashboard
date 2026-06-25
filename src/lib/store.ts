@@ -287,6 +287,22 @@ export function openItemTitles(projectId: number): string[] {
   ).map((r) => r.title);
 }
 
+/**
+ * A one-line seed describing the project, used to prefill the (editable) web-research query.
+ * Combines the project name with a few recent item titles for domain context; falls back to the
+ * name alone for an empty project.
+ */
+export function deriveResearchTopic(projectId: number): string {
+  const project = getProject(projectId);
+  const name = project?.name ?? "";
+  const titles = (
+    getDb()
+      .prepare("SELECT title FROM items WHERE project_id = ? ORDER BY id DESC LIMIT 6")
+      .all(projectId) as { title: string }[]
+  ).map((r) => r.title);
+  return titles.length ? `${name} — ${titles.join("; ")}` : name;
+}
+
 export interface InsertItemArgs {
   projectId: number;
   conversationId?: number | null;
@@ -296,6 +312,7 @@ export interface InsertItemArgs {
   status?: ItemStatus;
   priority?: Priority;
   sourceQuote?: string;
+  sourceUrl?: string;
 }
 
 /** Insert an item; returns the new row id, or null if it was a duplicate/tombstone. */
@@ -309,7 +326,8 @@ export function insertItem(a: InsertItemArgs): number | null {
   // Fuzzy dedup (any status — incl. done/dismissed) so a reworded version doesn't reappear on a
   // re-scan. A suggestion also dedups against TASKS (precedence task > suggestion), so "add
   // EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task. Learnings dedup
-  // only against other learnings — a learning can legitimately share wording with a task.
+  // only against other learnings. Research ideas dedup against task+suggestion+research so the web
+  // flow never resurfaces already-tracked work or repeats an idea across runs.
   const dupKinds: ItemKind[] | null =
     a.kind === "suggestion"
       ? ["task", "suggestion"]
@@ -317,14 +335,16 @@ export function insertItem(a: InsertItemArgs): number | null {
         ? ["task"]
         : a.kind === "learning"
           ? ["learning"]
-          : null;
+          : a.kind === "research"
+            ? ["task", "suggestion", "research"]
+            : null;
   if (dupKinds && findFuzzyDuplicate(a.projectId, dupKinds, a.title)) return null;
 
   const info = db
     .prepare(
       `INSERT INTO items
-         (project_id, conversation_id, kind, title, detail, status, priority, source_quote, norm_key)
-       VALUES (@project_id, @conversation_id, @kind, @title, @detail, @status, @priority, @source_quote, @norm_key)
+         (project_id, conversation_id, kind, title, detail, status, priority, source_quote, source_url, norm_key)
+       VALUES (@project_id, @conversation_id, @kind, @title, @detail, @status, @priority, @source_quote, @source_url, @norm_key)
        ON CONFLICT(project_id, kind, norm_key) DO NOTHING`,
     )
     .run({
@@ -336,6 +356,7 @@ export function insertItem(a: InsertItemArgs): number | null {
       status: a.status ?? "todo",
       priority: PRIORITY_RANK[a.priority ?? "medium"],
       source_quote: a.sourceQuote ?? "",
+      source_url: a.sourceUrl ?? null,
       norm_key: normKey,
     });
   return info.changes > 0 ? Number(info.lastInsertRowid) : null;

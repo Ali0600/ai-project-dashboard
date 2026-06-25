@@ -78,7 +78,7 @@ export default function ItemList({
               )}
               <SourceLine item={item} />
             </div>
-            {item.kind === "suggestion" && onPromote && (
+            {(item.kind === "suggestion" || item.kind === "research") && onPromote && (
               <button
                 title="Promote to a Board task"
                 onClick={(e) => {

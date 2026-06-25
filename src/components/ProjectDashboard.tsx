@@ -11,12 +11,14 @@ const TABS: { key: ItemKind; label: string; empty: string }[] = [
   { key: "task", label: "Board", empty: "" },
   { key: "suggestion", label: "Suggestions", empty: "No suggestions captured yet." },
   { key: "learning", label: "Learnings", empty: "No learnings captured yet." },
+  { key: "research", label: "Research", empty: 'No research yet — click "Use Internet for Research".' },
 ];
 
 const KIND_NOUN: Record<ItemKind, string> = {
   task: "task",
   suggestion: "suggestion",
   learning: "learning",
+  research: "idea",
 };
 
 /** Result of an "apply on a branch" run, surfaced in the detail modal. */
@@ -39,10 +41,36 @@ function progressLabel(ev: { phase: string; index?: number; total?: number; deta
       return ev.detail
         ? `Reading ${ev.detail} ${ev.index}/${ev.total}…`
         : `Extracting ${ev.index}/${ev.total}…`;
+    case "searching":
+      return "Searching the web…";
     case "ingesting":
       return "Saving…";
     default:
       return "Working…";
+  }
+}
+
+/** Read a fetch Response body as newline-delimited JSON, invoking `onEvent` per parsed line. */
+async function streamNdjson(res: Response, onEvent: (ev: Record<string, unknown>) => void): Promise<void> {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try {
+        onEvent(JSON.parse(line));
+      } catch {
+        /* ignore non-JSON lines */
+      }
+    }
   }
 }
 
@@ -59,15 +87,21 @@ export default function ProjectDashboard({
   projectId,
   conversationIds = [],
   pendingConversationIds = [],
+  derivedTopic = "",
 }: {
   initialItems?: ItemWithSource[];
   projectId: number;
   conversationIds?: number[];
   pendingConversationIds?: number[];
+  derivedTopic?: string;
 }) {
   const [items, setItems] = useState<ItemWithSource[]>(initialItems);
   const [active, setActive] = useState<ItemKind>("task");
   const [query, setQuery] = useState("");
+  // Web-research ("Use Internet for Research")
+  const [showResearch, setShowResearch] = useState(false);
+  const [researchBusy, setResearchBusy] = useState(false);
+  const [topic, setTopic] = useState(derivedTopic);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [recentlyAdded, setRecentlyAdded] = useState<Set<number>>(new Set());
   const [pending, setPending] = useState<number[]>(pendingConversationIds);
@@ -227,16 +261,69 @@ export default function ProjectDashboard({
     setSummary(error ? `Scan error: ${error}` : buildSummary(fresh, newIds, flagged));
   }
 
-  function buildSummary(list: ItemWithSource[], newIds: number[], flagged: number): string {
+  function buildSummary(
+    list: ItemWithSource[],
+    newIds: number[],
+    flagged: number,
+    label = "Scan",
+  ): string {
     const ids = new Set(newIds);
     const counts: Partial<Record<ItemKind, number>> = {};
     for (const it of list) if (ids.has(it.id)) counts[it.kind] = (counts[it.kind] ?? 0) + 1;
     const parts = (Object.entries(counts) as [ItemKind, number][]).map(
       ([k, n]) => `+${n} ${KIND_NOUN[k]}${n > 1 ? "s" : ""}`,
     );
-    let s = parts.length ? `Scan complete — ${parts.join(", ")}` : "Scan complete — no new items";
+    let s = parts.length ? `${label} complete — ${parts.join(", ")}` : `${label} complete — no new items`;
     if (flagged > 0) s += ` · ${flagged} task${flagged > 1 ? "s" : ""} look done`;
     return s;
+  }
+
+  // Research the web for requested features; ingest as `research` items, streaming live progress.
+  async function runResearch() {
+    if (busy || researchBusy) return;
+    setResearchBusy(true);
+    setSummary(null);
+    setScan({ convIndex: 1, convTotal: 1, label: "Searching the web…", stepStart: Date.now() });
+    const newIds: number[] = [];
+    let error = "";
+    try {
+      const res = await fetch(`/api/projects/${projectId}/research`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ topic }),
+      });
+      const ctype = res.headers.get("content-type") || "";
+      if (!res.body || !ctype.includes("ndjson")) {
+        const json = await res.json().catch(() => ({}));
+        error = json.error || "research failed";
+      } else {
+        await streamNdjson(res, (ev) => {
+          if (ev.phase === "result") {
+            if (Array.isArray(ev.createdIds)) newIds.push(...(ev.createdIds as number[]));
+          } else if (ev.phase === "error") {
+            error = (ev.error as string) || "research failed";
+          } else {
+            const label = progressLabel(ev as { phase: string });
+            setScan((prev) => ({
+              convIndex: 1,
+              convTotal: 1,
+              label,
+              stepStart: prev && prev.label === label ? prev.stepStart : Date.now(),
+            }));
+          }
+        });
+      }
+    } catch {
+      error = "research request failed";
+    }
+
+    const fresh = await refetch();
+    setRecentlyAdded(new Set(newIds));
+    setScan(null);
+    setResearchBusy(false);
+    setShowResearch(false);
+    if (!error) setActive("research"); // surface the results
+    setSummary(error ? `Research error: ${error}` : buildSummary(fresh, newIds, 0, "Research"));
   }
 
   const byKind = (kind: ItemKind) =>
@@ -245,7 +332,7 @@ export default function ProjectDashboard({
   const q = query.trim().toLowerCase();
   const matchesQuery = (i: ItemWithSource) =>
     !q || i.title.toLowerCase().includes(q) || (i.detail ?? "").toLowerCase().includes(q);
-  const isError = summary?.startsWith("Scan error");
+  const isError = summary?.includes("error:");
   const selected = selectedId != null ? items.find((i) => i.id === selectedId) ?? null : null;
   const dismissed = items.filter((i) => i.status === "dismissed");
 
@@ -290,12 +377,12 @@ export default function ProjectDashboard({
         </div>
       )}
 
-      {/* Live scan progress (streamed step-by-step) */}
-      {busy && scan && (
+      {/* Live progress (streamed step-by-step) — shared by scan + research */}
+      {(busy || researchBusy) && scan && (
         <div className="mb-4 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm dark:border-indigo-500/30 dark:bg-indigo-500/10">
           <div className="flex items-center gap-2 font-medium text-indigo-800 dark:text-indigo-300">
             <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
-            Scanning conversation {scan.convIndex}/{scan.convTotal}
+            {researchBusy ? "Researching the web" : `Scanning conversation ${scan.convIndex}/${scan.convTotal}`}
           </div>
           <div className="mt-1 flex items-center gap-2 pl-[1.375rem] text-indigo-700/80 dark:text-indigo-300/80">
             <span>{scan.label}</span>
@@ -307,7 +394,7 @@ export default function ProjectDashboard({
       )}
 
       {/* Post-scan summary banner */}
-      {summary && !busy && (
+      {summary && !busy && !researchBusy && (
         <div
           className={`mb-4 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm ${
             isError
@@ -328,6 +415,52 @@ export default function ProjectDashboard({
           </button>
         </div>
       )}
+
+      {/* Use Internet for Research */}
+      <div className="mb-4">
+        {!showResearch ? (
+          <button
+            onClick={() => {
+              setTopic(derivedTopic);
+              setShowResearch(true);
+            }}
+            disabled={busy || researchBusy}
+            title="Search the web (Reddit, forums, …) for features people are requesting for a project like this"
+            className="rounded-lg border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-60 dark:border-indigo-500/30 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+          >
+            🌐 Use Internet for Research
+          </button>
+        ) : (
+          <div className="rounded-lg border border-indigo-300 bg-indigo-50/50 p-2 dark:border-indigo-500/30 dark:bg-indigo-500/5">
+            <label className="text-xs text-zinc-500">What to research (edit as needed):</label>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <input
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. a grocery-deals mobile app"
+                className="min-w-0 flex-1 rounded-lg border border-black/15 bg-white px-2.5 py-1.5 text-sm focus:border-indigo-400 focus:outline-none dark:border-white/15 dark:bg-zinc-900"
+              />
+              <button
+                onClick={runResearch}
+                disabled={researchBusy || !topic.trim()}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {researchBusy ? "Researching…" : "Run"}
+              </button>
+              <button
+                onClick={() => setShowResearch(false)}
+                disabled={researchBusy}
+                className="rounded-lg border border-black/15 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-black/5 disabled:opacity-60 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+              >
+                Cancel
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-400">
+              Finds features people request on the web; results land in the Research tab to triage.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Tabs + search */}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-2 border-b border-black/10 dark:border-white/10">

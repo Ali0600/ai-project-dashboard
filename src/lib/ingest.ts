@@ -5,7 +5,7 @@ import {
   flagSuggestedDone,
   insertItem,
 } from "./store";
-import type { ExtractionResult } from "./types";
+import type { ExtractionResult, ResearchIdea } from "./types";
 
 export interface IngestResult {
   created: number;
@@ -75,5 +75,31 @@ export function ingestExtraction(opts: {
     }
 
     return { created: createdIds.length, flaggedDone, createdIds };
+  })();
+}
+
+/**
+ * Write web-research ideas into the DB as `research` items (separate from the conversation
+ * extraction path). Dedup + tombstoning are enforced by insertItem. Returns created ids.
+ */
+export function ingestResearch(opts: {
+  projectId: number;
+  ideas: ResearchIdea[];
+}): { created: number; createdIds: number[] } {
+  const { projectId, ideas } = opts;
+  return getDb().transaction((): { created: number; createdIds: number[] } => {
+    const createdIds: number[] = [];
+    for (const idea of ideas) {
+      const id = insertItem({
+        projectId,
+        kind: "research",
+        title: idea.title,
+        detail: idea.detail,
+        sourceQuote: idea.source_quote,
+        sourceUrl: idea.source_url || undefined,
+      });
+      if (id != null) createdIds.push(id);
+    }
+    return { created: createdIds.length, createdIds };
   })();
 }
