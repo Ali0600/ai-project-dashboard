@@ -267,6 +267,21 @@ parent happened to be launched*, which is invisible and non-reproducible.
   drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
   parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
 
+## Sandbox an autonomous file-writing agent in a git worktree + branch
+To let an AI agent edit a repo without risking the working copy, run it inside a fresh
+`git worktree add -b <branch> <tmpdir> HEAD` — an isolated checkout of the same commit. The agent
+edits there with auto-accept; you then `add -A` + `diff --cached` to capture the change, commit it on
+the branch, and `worktree remove` the temp dir (the branch + commit persist). The main checkout is
+never touched, and nothing is pushed — review/push stays manual.
+- **Why it came up:** the dashboard's "Apply on a branch" upgrades read-only "Implement" to actually
+  apply a plan (`--permission-mode acceptEdits`) — but autonomously editing the user's *other* repos
+  needs a blast-radius limit.
+- **Two gotchas:** (1) run the agent **fresh, not `--resume`** — a resumed session can carry absolute
+  paths from the original cwd and write *outside* the worktree, defeating isolation. (2) Also disallow
+  `Bash`/network tools so "edits only" really means edits only.
+- **Takeaway:** worktree-per-agent-run is the cheap sandbox for autonomous code changes — isolated,
+  reviewable as a branch diff, trivially discardable (`worktree remove` + `branch -D`), main untouched.
+
 ## Single-table polymorphism: every kind-specific operation must filter by `kind`
 When one table holds several "kinds" of row (`items.kind = task|suggestion|learning`), a query that
 implements behaviour meaningful for only **one** kind must say `WHERE kind = '…'`. Omit it and the
