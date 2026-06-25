@@ -250,7 +250,7 @@ DETAILS: ${opts.detail || "(none)"}`;
     IMPLEMENT_BUDGET,
     // Read-only: no file edits, no shell — guarantees "plan only, applies nothing".
     "--disallowed-tools",
-    "Write Edit MultiEdit NotebookEdit Bash",
+    "Write Edit NotebookEdit Bash",
   ];
   if (opts.sessionId) args.push("--resume", opts.sessionId);
   else args.push("--no-session-persistence");
@@ -430,7 +430,7 @@ Return the JSON object now.`;
     "--allowed-tools",
     "WebSearch WebFetch Read",
     "--disallowed-tools",
-    "Write Edit MultiEdit NotebookEdit Bash",
+    "Write Edit NotebookEdit Bash",
     "--no-session-persistence",
   ];
 
