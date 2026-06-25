@@ -40,7 +40,9 @@ command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` a
 - **Additive DB columns**: guarded `PRAGMA table_info` + `ALTER` in `db.ts` `migrate()` (keep the
   SCHEMA default and the ALTER default identical).
 - The dashboard's own headless `claude -p` runs set `DASHBOARD_EXTRACTION=1` so `flag-hook` ignores
-  them (don't capture our subprocesses as conversations).
+  them (don't capture our subprocesses as conversations). Child env is built by `spawnEnv()`; with
+  `DASHBOARD_FORCE_SUBSCRIPTION_AUTH=1` it strips inherited `ANTHROPIC_*` so `claude` uses its
+  persistent login (`claude setup-token`) instead of an expired inherited token (avoids 401s).
 - **Capture is opt-in.** A folder becomes a project only via `/sync-board` or `npm run backfill`
   (both call `getOrCreateProject`). `flag-hook` only flags sessions whose `cwd` is **already** a
   project (`getProjectByCwd`), so one-off sessions never auto-create projects. The overview

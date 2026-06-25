@@ -53,15 +53,38 @@ ${conversationText}
 Return the JSON object now.`;
 }
 
+/** True when DASHBOARD_FORCE_SUBSCRIPTION_AUTH is set to a truthy value (opt-in). */
+function forceSubscriptionAuth(): boolean {
+  const v = process.env.DASHBOARD_FORCE_SUBSCRIPTION_AUTH;
+  return v != null && v !== "" && v !== "0" && v.toLowerCase() !== "false";
+}
+
+/**
+ * Build the environment for a spawned `claude` process. Always tags it with DASHBOARD_EXTRACTION
+ * (so flag-hook ignores it). When `force` is set, strips every inherited `ANTHROPIC_*` variable
+ * (API key, auth token, base URL, …) so the CLI falls back to its own persistent login
+ * (`claude setup-token`) instead of a possibly-expired token inherited from the parent shell
+ * (e.g. the desktop app's terminal) — preventing 401 "poisoning".
+ */
+export function spawnEnv(base: NodeJS.ProcessEnv, force: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, DASHBOARD_EXTRACTION: "1" };
+  if (force) {
+    for (const key of Object.keys(env)) {
+      if (/^ANTHROPIC_/i.test(key)) delete env[key];
+    }
+  }
+  return env;
+}
+
 /** Spawn the `claude` CLI with the given args; prompt (if any) is piped via stdin. */
 function spawnClaude(args: string[], opts: { cwd?: string; input?: string } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Mark these as the dashboard's own subprocesses so our SessionEnd hook
-    // (flag-hook.ts) ignores them instead of capturing them as conversations.
+    // Mark these as the dashboard's own subprocesses so our SessionEnd hook (flag-hook.ts)
+    // ignores them; optionally strip inherited ANTHROPIC_* so we use the persistent login.
     const child = spawn("claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: opts.cwd,
-      env: { ...process.env, DASHBOARD_EXTRACTION: "1" },
+      env: spawnEnv(process.env, forceSubscriptionAuth()),
     });
     let out = "";
     let err = "";

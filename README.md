@@ -117,6 +117,7 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `CHUNK_CHARS` | `120000` | Max characters per extraction chunk |
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 | `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |
+| `DASHBOARD_FORCE_SUBSCRIPTION_AUTH` | `0` | Set `1` to strip inherited `ANTHROPIC_*` from spawned `claude` runs, forcing your persistent login (avoids 401s from an expired inherited token) |
 
 ## Docker
 
