@@ -267,6 +267,20 @@ parent happened to be launched*, which is invisible and non-reproducible.
   drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
   parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
 
+## A deny-list of named capabilities breaks when a name drifts — prefer an allow-list
+Restricting a tool by **naming what to forbid** (`--disallowed-tools "Write Edit MultiEdit …"`)
+couples you to exact capability names. When `MultiEdit` was merged into `Edit` in a newer Claude
+CLI, the now-unknown name made the CLI reject the *whole* run at startup (`Permission deny rule
+"MultiEdit" matches no known tool`) — every headless research/implement call exited 1 before doing
+anything. Worse for security: a deny-list also **fails open** — if a new editing tool is added that
+you didn't list, it's silently allowed.
+- **Why it came up:** the "Use Internet for Research" run died at launch on a stale tool name copied
+  from the older read-only Implement command.
+- **Takeaway:** to bound an agent/process's capabilities, prefer an **allow-list of what it may do**
+  (`--allowed-tools "WebSearch WebFetch Read"`) over a deny-list of what it may not — allow-lists fail
+  *safe* (new capabilities are denied by default) and don't break when a forbidden name is renamed or
+  removed. Validate name-based rules against the tool's *current* vocabulary, not yesterday's.
+
 ## Give an agent the web by toggling its tools, not by wiring a search API
 Claude Code already ships `WebSearch` + `WebFetch` tools, so "research the web" needs no third-party
 search API or key — run a headless `claude -p` with `--allowed-tools "WebSearch WebFetch"` and have it
