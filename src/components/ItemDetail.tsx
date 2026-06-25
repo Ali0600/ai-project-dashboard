@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { formatDate } from "@/lib/format";
 import type { ItemStatus, ItemWithSource } from "@/lib/types";
 import CopyButton from "./CopyButton";
+import type { ApplyOutcome } from "./ProjectDashboard";
 import PriorityPill from "./PriorityPill";
 
 const KIND_LABEL: Record<string, string> = {
@@ -26,6 +27,7 @@ export default function ItemDetail({
   onDismissSuggestion,
   onPriorityChange,
   onImplement,
+  onApply,
   onPromote,
 }: {
   item: ItemWithSource | null;
@@ -35,10 +37,14 @@ export default function ItemDetail({
   onDismissSuggestion: (id: number) => void;
   onPriorityChange: (id: number, rank: number) => void;
   onImplement: (id: number) => Promise<void>;
+  onApply: (id: number) => Promise<ApplyOutcome>;
   onPromote: (id: number) => void;
 }) {
   const [implBusy, setImplBusy] = useState(false);
   const [implError, setImplError] = useState<string | null>(null);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyNote, setApplyNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!item) return;
@@ -60,6 +66,33 @@ export default function ItemDetail({
       setImplError((e as Error).message);
     } finally {
       setImplBusy(false);
+    }
+  }
+
+  async function runApply() {
+    if (
+      !window.confirm(
+        "Let Claude edit files to implement this task? It runs in an isolated git worktree on a new " +
+          "branch — your working copy is untouched and nothing is pushed. You review and push the branch yourself.",
+      )
+    )
+      return;
+    setApplyBusy(true);
+    setApplyError(null);
+    setApplyNote(null);
+    try {
+      const r = await onApply(item!.id);
+      setApplyNote(
+        r.changedFiles > 0
+          ? `Created branch ${r.branch} with ${r.changedFiles} changed file${r.changedFiles > 1 ? "s" : ""}.${
+              r.worktreeDir ? ` (Uncommitted — see worktree ${r.worktreeDir})` : ""
+            }`
+          : "Claude made no file changes.",
+      );
+    } catch (e) {
+      setApplyError((e as Error).message);
+    } finally {
+      setApplyBusy(false);
     }
   }
 
@@ -187,6 +220,46 @@ export default function ItemDetail({
             {item.implementation_plan && (
               <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md bg-black/5 p-3 text-xs leading-relaxed text-zinc-700 dark:bg-white/5 dark:text-zinc-300">
                 {item.implementation_plan}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {/* Apply on a branch (tasks only) — edits enabled, isolated worktree, nothing pushed */}
+        {isTask && (
+          <div className="mt-4 border-t border-black/10 pt-3 dark:border-white/10">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Apply on a branch
+              </p>
+              <button
+                onClick={runApply}
+                disabled={applyBusy}
+                title="Let Claude implement this in an isolated git worktree on a new branch (nothing is pushed)"
+                className="rounded-lg border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-60 dark:border-indigo-500/30 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+              >
+                {applyBusy ? "Applying…" : item.apply_branch ? "Re-apply" : "⎇ Apply on a branch"}
+              </button>
+            </div>
+            {applyBusy && (
+              <p className="mt-2 text-xs text-zinc-500">
+                Editing files on a new branch in an isolated worktree… this can take a few minutes.
+              </p>
+            )}
+            {applyError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{applyError}</p>}
+            {applyNote && <p className="mt-2 text-xs text-zinc-500">{applyNote}</p>}
+            {item.apply_branch && (
+              <p className="mt-2 text-xs text-zinc-500">
+                Branch{" "}
+                <code className="rounded bg-black/10 px-1 py-0.5 dark:bg-white/10">
+                  {item.apply_branch}
+                </code>{" "}
+                — review and push it yourself.
+              </p>
+            )}
+            {item.apply_diff && (
+              <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre rounded-md bg-black/5 p-3 text-[11px] leading-relaxed text-zinc-700 dark:bg-white/5 dark:text-zinc-300">
+                {item.apply_diff}
               </pre>
             )}
           </div>

@@ -381,6 +381,51 @@ export function dismissSuggestionsCollidingWithTasks(projectId: number): number 
 }
 
 /**
+ * Collapse reworded duplicate tasks within a project: among each cluster of near-duplicate
+ * (token-Jaccard ≥ DEDUP_JACCARD, ≥2 shared tokens) non-dismissed tasks, keep one canonical —
+ * preferring a `done` task (the work is finished), else the oldest (lowest id) — and dismiss the
+ * rest. Fuzzy dedup on insert already blocks *new* near-dups; this retires ones that predate it
+ * (and the done↔done case it never covered). Run after ingesting tasks. Returns the number dismissed.
+ */
+export function collapseDuplicateTasks(projectId: number): number {
+  const db = getDb();
+  const tasks = db
+    .prepare(
+      "SELECT id, title, status FROM items WHERE project_id = ? AND kind = 'task' AND status != 'dismissed'",
+    )
+    .all(projectId) as { id: number; title: string; status: ItemStatus }[];
+  if (tasks.length < 2) return 0;
+  const dismiss = db.prepare(
+    "UPDATE items SET status = 'dismissed', updated_at = datetime('now') WHERE id = ?",
+  );
+  const dismissed = new Set<number>();
+  let n = 0;
+  for (let i = 0; i < tasks.length; i++) {
+    const a = tasks[i];
+    if (dismissed.has(a.id)) continue;
+    const cluster = [a];
+    for (let j = i + 1; j < tasks.length; j++) {
+      const b = tasks[j];
+      if (dismissed.has(b.id)) continue;
+      const { score, shared } = titleJaccard(a.title, b.title);
+      if (shared >= 2 && score >= DEDUP_JACCARD) cluster.push(b);
+    }
+    if (cluster.length < 2) continue;
+    const canonical =
+      cluster.find((t) => t.status === "done") ??
+      cluster.reduce((m, t) => (t.id < m.id ? t : m), cluster[0]);
+    for (const t of cluster) {
+      if (t.id !== canonical.id) {
+        dismiss.run(t.id);
+        dismissed.add(t.id);
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
+/**
  * Promote a suggestion into a Board task. If a non-dismissed task with the same norm_key
  * already exists (or the rename would collide with a task tombstone), dismiss the suggestion
  * instead and report "merged".
@@ -446,6 +491,15 @@ export function saveImplementationPlan(id: number, plan: string): void {
   getDb()
     .prepare("UPDATE items SET implementation_plan = ?, updated_at = datetime('now') WHERE id = ?")
     .run(plan, id);
+}
+
+/** Persist the branch + diff produced by an "apply on a branch" run. */
+export function saveApplyResult(id: number, branch: string | null, diff: string | null): void {
+  getDb()
+    .prepare(
+      "UPDATE items SET apply_branch = ?, apply_diff = ?, updated_at = datetime('now') WHERE id = ?",
+    )
+    .run(branch, diff, id);
 }
 
 /** Flag an open item as "looks done" with supporting evidence. */

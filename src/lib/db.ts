@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS items (
   source_uuid     TEXT,
   source_quote    TEXT,
   implementation_plan TEXT,
+  apply_branch    TEXT,
+  apply_diff      TEXT,
   norm_key        TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -91,6 +93,8 @@ function migrate(db: Database.Database): void {
   // 3 = medium (matches PRIORITY_RANK and the SCHEMA default).
   ensure("priority", "priority INTEGER NOT NULL DEFAULT 3");
   ensure("implementation_plan", "implementation_plan TEXT");
+  ensure("apply_branch", "apply_branch TEXT");
+  ensure("apply_diff", "apply_diff TEXT");
 
   // One-time consolidation: merge legacy `recommendation` + `next_step` into a single
   // `suggestion` kind. Idempotent — after the first run there are no legacy-kind rows left,

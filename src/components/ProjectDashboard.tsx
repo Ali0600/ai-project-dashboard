@@ -19,6 +19,9 @@ const KIND_NOUN: Record<ItemKind, string> = {
   learning: "learning",
 };
 
+/** Result of an "apply on a branch" run, surfaced in the detail modal. */
+export type ApplyOutcome = { branch: string; changedFiles: number; worktreeDir: string | null };
+
 /** Current live scan step shown in the progress panel. */
 type ScanStep = {
   convIndex: number;
@@ -64,6 +67,7 @@ export default function ProjectDashboard({
 }) {
   const [items, setItems] = useState<ItemWithSource[]>(initialItems);
   const [active, setActive] = useState<ItemKind>("task");
+  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [recentlyAdded, setRecentlyAdded] = useState<Set<number>>(new Set());
   const [pending, setPending] = useState<number[]>(pendingConversationIds);
@@ -114,6 +118,18 @@ export default function ProjectDashboard({
     setItems((prev) =>
       prev.map((i) => (i.id === id ? { ...i, implementation_plan: json.plan } : i)),
     );
+  }
+
+  // Apply the plan on an isolated git branch (edits enabled, nothing pushed); persists branch + diff.
+  async function apply(id: number): Promise<ApplyOutcome> {
+    const res = await fetch(`/api/items/${id}/apply`, { method: "POST" });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Apply failed");
+    const branch: string | null = json.changedFiles > 0 ? json.branch : null;
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, apply_branch: branch, apply_diff: json.diff || null } : i)),
+    );
+    return { branch: json.branch, changedFiles: json.changedFiles, worktreeDir: json.worktreeDir };
   }
 
   function handleCreated(item: ItemWithSource) {
@@ -225,6 +241,10 @@ export default function ProjectDashboard({
 
   const byKind = (kind: ItemKind) =>
     items.filter((i) => i.kind === kind && i.status !== "dismissed");
+  // Client-side text filter (title + detail). Empty query = no filtering; tab counts stay unfiltered.
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (i: ItemWithSource) =>
+    !q || i.title.toLowerCase().includes(q) || (i.detail ?? "").toLowerCase().includes(q);
   const isError = summary?.startsWith("Scan error");
   const selected = selectedId != null ? items.find((i) => i.id === selectedId) ?? null : null;
   const dismissed = items.filter((i) => i.status === "dismissed");
@@ -309,28 +329,38 @@ export default function ProjectDashboard({
         </div>
       )}
 
-      {/* Tabs */}
-      <nav className="mb-5 flex flex-wrap gap-1 border-b border-black/10 dark:border-white/10">
-        {TABS.map((tab) => {
-          const selectedTab = active === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActive(tab.key)}
-              className={`relative -mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                selectedTab
-                  ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
-                  : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-              }`}
-            >
-              {tab.label}
-              <span className="ml-1.5 rounded-full bg-black/10 px-1.5 text-xs dark:bg-white/10">
-                {byKind(tab.key).length}
-              </span>
-            </button>
-          );
-        })}
-      </nav>
+      {/* Tabs + search */}
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-2 border-b border-black/10 dark:border-white/10">
+        <nav className="flex flex-wrap gap-1">
+          {TABS.map((tab) => {
+            const selectedTab = active === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActive(tab.key)}
+                className={`relative -mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  selectedTab
+                    ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                }`}
+              >
+                {tab.label}
+                <span className="ml-1.5 rounded-full bg-black/10 px-1.5 text-xs dark:bg-white/10">
+                  {byKind(tab.key).length}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search items…"
+          aria-label="Search items"
+          className="mb-1.5 w-40 rounded-lg border border-black/15 bg-transparent px-2.5 py-1 text-sm placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none dark:border-white/15 sm:w-56"
+        />
+      </div>
 
       {/* Content */}
       {active === "task" ? (
@@ -352,7 +382,7 @@ export default function ProjectDashboard({
             </div>
           )}
           <KanbanBoard
-            tasks={items.filter((i) => i.kind === "task")}
+            tasks={items.filter((i) => i.kind === "task" && matchesQuery(i))}
             recentlyAdded={recentlyAdded}
             onMove={moveTask}
             onConfirm={confirmDone}
@@ -363,7 +393,7 @@ export default function ProjectDashboard({
         </div>
       ) : (
         <ItemList
-          items={items.filter((i) => i.kind === active)}
+          items={items.filter((i) => i.kind === active && matchesQuery(i))}
           emptyLabel={TABS.find((t) => t.key === active)!.empty}
           recentlyAdded={recentlyAdded}
           onSetStatus={setStatus}
@@ -412,6 +442,7 @@ export default function ProjectDashboard({
         onDismissSuggestion={dismissSuggestion}
         onPriorityChange={setPriority}
         onImplement={implement}
+        onApply={apply}
         onPromote={promote}
       />
     </div>

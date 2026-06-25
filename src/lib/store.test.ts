@@ -2,12 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { getDb } from "./db";
 import {
+  collapseDuplicateTasks,
   flagSuggestedDone,
   getOrCreateProject,
   hasUnscannedActivity,
   insertItem,
   listItems,
+  normalizeTitle,
   titleJaccard,
   titleMatchScore,
   tokenize,
@@ -156,5 +159,30 @@ describe("insertItem fuzzy-dedups learnings (only against other learnings)", () 
     insertItem({ projectId: p.id, kind: "task", title: "Configure CI caching" });
     const learning = insertItem({ projectId: p.id, kind: "learning", title: "Configure CI caching" });
     expect(learning).not.toBeNull();
+  });
+});
+
+describe("collapseDuplicateTasks", () => {
+  it("dismisses a reworded duplicate task, keeping the done canonical; leaves distinct tasks", () => {
+    const p = getOrCreateProject("/tmp/store-test-collapse");
+    // Seed pre-existing near-dups directly (insertItem would dedup them on the way in).
+    const seed = getDb().prepare(
+      "INSERT INTO items (project_id, kind, title, status, norm_key) VALUES (?, 'task', ?, ?, ?)",
+    );
+    for (const [title, status] of [
+      ["Add EXPO_TOKEN GitHub secret", "done"],
+      ["Add EXPO_TOKEN secret to GitHub", "todo"],
+      ["Deploy to Render with monitoring", "todo"],
+    ] as const) {
+      seed.run(p.id, title, status, normalizeTitle(title));
+    }
+
+    expect(collapseDuplicateTasks(p.id)).toBe(1);
+
+    const tasks = listItems(p.id, "task");
+    const byTitle = (t: string) => tasks.find((i) => i.title === t);
+    expect(byTitle("Add EXPO_TOKEN GitHub secret")?.status).toBe("done"); // canonical kept
+    expect(byTitle("Add EXPO_TOKEN secret to GitHub")?.status).toBe("dismissed"); // reworded dup
+    expect(byTitle("Deploy to Render with monitoring")?.status).toBe("todo"); // distinct, untouched
   });
 });

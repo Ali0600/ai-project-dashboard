@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import DeleteProjectButton from "@/components/DeleteProjectButton";
 import ProjectDashboard from "@/components/ProjectDashboard";
 import { getProject, hasUnscannedActivity, listConversations, listItemsWithSource } from "@/lib/store";
 
@@ -20,11 +21,20 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
           ← All projects
         </Link>
-        <h1 className="mt-1 text-2xl font-bold">{project.name}</h1>
-        <p className="text-xs text-zinc-400">{project.cwd}</p>
-        <p className="mt-1 text-sm text-zinc-500">
-          {conversations.length} conversation{conversations.length === 1 ? "" : "s"}
-        </p>
+        <div className="mt-1 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold">{project.name}</h1>
+            <p className="text-xs text-zinc-400">{project.cwd}</p>
+            <p className="mt-1 text-sm text-zinc-500">
+              {conversations.length} conversation{conversations.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <DeleteProjectButton
+            projectId={project.id}
+            projectName={project.name}
+            className="mt-1 shrink-0"
+          />
+        </div>
       </div>
 
       <ProjectDashboard

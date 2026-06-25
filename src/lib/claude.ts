@@ -1,10 +1,14 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { ExtractionResult, PRIORITIES, type Priority } from "./types";
 
 const MODEL = process.env.CLAUDE_EXTRACT_MODEL || "haiku";
 const MAX_BUDGET = process.env.CLAUDE_MAX_BUDGET_USD || "0.25";
 const IMPLEMENT_MODEL = process.env.CLAUDE_IMPLEMENT_MODEL || "sonnet";
 const IMPLEMENT_BUDGET = process.env.CLAUDE_IMPLEMENT_BUDGET_USD || "0.50";
+const APPLY_BUDGET = process.env.CLAUDE_APPLY_BUDGET_USD || "1.00";
+const APPLY_DIFF_MAX = 20_000; // cap the diff stored/returned so a huge change doesn't bloat the payload
 
 export class ClaudeUnavailableError extends Error {}
 
@@ -254,6 +258,132 @@ DETAILS: ${opts.detail || "(none)"}`;
     throw new Error(`Claude implement failed: ${envelope.subtype || "unknown error"}`);
   }
   return String(envelope.result ?? "").trim();
+}
+
+/** Run a git command in `cwd`, resolving stdout (throws with stderr on failure). */
+function git(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`git ${args.join(" ")} failed: ${(stderr || err.message).trim()}`));
+      else resolve(stdout);
+    });
+  });
+}
+
+function branchSlug(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "task"
+  );
+}
+
+export interface ApplyResult {
+  branch: string;
+  changedFiles: number;
+  diff: string;
+  summary: string;
+  /** Set only when changes were made but couldn't be committed — the worktree is kept for recovery. */
+  worktreeDir: string | null;
+}
+
+/**
+ * "Apply on a branch": run the agent with edits ENABLED but bounded, inside an isolated git
+ * worktree + new branch of the task's project, then capture the diff. The main checkout is never
+ * touched, shell/network tools are disallowed, and nothing is pushed or PR'd — the durable artifact
+ * is a local `dashboard/apply-*` branch the user reviews and pushes themselves.
+ *
+ * Runs fresh (NOT `--resume`) so every file operation is relative to the worktree cwd — a resumed
+ * session could carry absolute paths back to the original checkout and defeat the isolation.
+ */
+export async function applyPlanOnBranch(opts: {
+  cwd: string;
+  title: string;
+  detail: string;
+  plan?: string | null;
+}): Promise<ApplyResult> {
+  let repoRoot: string;
+  try {
+    repoRoot = (await git(["rev-parse", "--show-toplevel"], opts.cwd)).trim();
+  } catch {
+    throw new Error(
+      `Not a git repository: ${opts.cwd}. "Apply on a branch" needs the project to be under git.`,
+    );
+  }
+
+  const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const branch = `dashboard/apply-${branchSlug(opts.title)}-${Date.now().toString(36)}`;
+  const worktreeDir = path.join(os.tmpdir(), `dash-apply-${stamp}`);
+
+  await git(["worktree", "add", "-b", branch, worktreeDir, "HEAD"], repoRoot);
+
+  try {
+    const prompt = `Implement the task below by editing files in THIS repository. Make the changes directly; keep them focused and correct. Do not run shell commands.
+
+TASK: ${opts.title}
+DETAILS: ${opts.detail || "(none)"}${opts.plan ? `\n\nPLAN TO FOLLOW:\n${opts.plan}` : ""}
+
+When done, briefly summarize what you changed (the key files and the gist).`;
+
+    const args = [
+      "-p",
+      "--output-format",
+      "json",
+      "--model",
+      IMPLEMENT_MODEL,
+      "--max-budget-usd",
+      APPLY_BUDGET,
+      // Edits auto-accepted, but bounded: deny shell + network so the run only changes files here.
+      "--permission-mode",
+      "acceptEdits",
+      "--disallowed-tools",
+      "Bash WebFetch WebSearch",
+      "--no-session-persistence",
+    ];
+
+    const envelope = JSON.parse(await spawnClaude(args, { cwd: worktreeDir, input: prompt }));
+    if (envelope.is_error || envelope.subtype !== "success") {
+      throw new Error(`Claude apply failed: ${envelope.subtype || "unknown error"}`);
+    }
+    const summary = String(envelope.result ?? "").trim();
+
+    await git(["add", "-A"], worktreeDir);
+    const nameOnly = (await git(["diff", "--cached", "--name-only"], worktreeDir)).trim();
+    if (!nameOnly) {
+      // Agent made no edits — clean up the throwaway branch + worktree.
+      await git(["worktree", "remove", "--force", worktreeDir], repoRoot).catch(() => {});
+      await git(["branch", "-D", branch], repoRoot).catch(() => {});
+      return { branch, changedFiles: 0, diff: "", summary, worktreeDir: null };
+    }
+
+    const changedFiles = nameOnly.split("\n").filter(Boolean).length;
+    let diff = await git(["diff", "--cached"], worktreeDir);
+    if (diff.length > APPLY_DIFF_MAX) {
+      diff = `${diff.slice(0, APPLY_DIFF_MAX)}\n… (diff truncated at ${APPLY_DIFF_MAX} chars)`;
+    }
+
+    // Commit so the branch is a clean, reviewable artifact; then drop the temp worktree (branch stays).
+    let committed = false;
+    try {
+      await git(["commit", "-q", "-m", `Apply: ${opts.title}`], worktreeDir);
+      committed = true;
+    } catch {
+      committed = false; // e.g. missing git identity — keep the worktree so the changes aren't lost.
+    }
+
+    if (committed) {
+      await git(["worktree", "remove", "--force", worktreeDir], repoRoot).catch(() => {});
+      return { branch, changedFiles, diff, summary, worktreeDir: null };
+    }
+    return { branch, changedFiles, diff, summary, worktreeDir };
+  } catch (e) {
+    // Leave nothing dangling on failure.
+    await git(["worktree", "remove", "--force", worktreeDir], repoRoot).catch(() => {});
+    await git(["branch", "-D", branch], repoRoot).catch(() => {});
+    throw e;
+  }
 }
 
 /** Merge several chunk extractions into one (DB handles final de-duplication). */
