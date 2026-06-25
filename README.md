@@ -4,8 +4,8 @@
 
 Turn your Claude Code conversations into a visual project workspace. The dashboard scans
 your local conversation transcripts and surfaces, per project, a **Kanban task board** plus
-**Suggestions** and **Learnings** — so the ideas and to‑dos that normally scroll away in chat
-don't get lost.
+**Suggestions**, **Learnings**, and **Research** (web-sourced feature ideas) — so the ideas
+and to‑dos that normally scroll away in chat don't get lost.
 
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash
   command uses your current session; backfill and the dashboard's "Scan" button use headless
@@ -46,6 +46,9 @@ don't get lost.
 - **"Apply on a branch"** — runs the agent with edits enabled but **sandboxed**: an isolated
   `git worktree` + `dashboard/apply-*` branch, `acceptEdits` with shell/network disabled, the diff
   captured and committed for review. The main checkout is never touched and nothing is pushed.
+- **"Use Internet for Research"** — a headless `claude -p` with **WebSearch/WebFetch enabled**
+  (edit/shell disabled) mines Reddit, forums, and the wider web for features people are *requesting*
+  for projects like yours, then ingests them as deduped, source-linked ideas in a **Research** tab.
 - **Tested & CI-gated** — Vitest unit tests for the streaming transcript parser; GitHub Actions runs
   typecheck · lint · test · build on every push.
 
@@ -121,6 +124,8 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `CLAUDE_IMPLEMENT_MODEL` | `sonnet` | Model for the "Implement" plan run |
 | `CLAUDE_IMPLEMENT_BUDGET_USD` | `0.50` | Per-call spend cap for "Implement" |
 | `CLAUDE_APPLY_BUDGET_USD` | `1.00` | Per-call spend cap for "Apply on a branch" (edits enabled) |
+| `CLAUDE_RESEARCH_MODEL` | `sonnet` | Model for "Use Internet for Research" (web search + synthesis) |
+| `CLAUDE_RESEARCH_BUDGET_USD` | `0.50` | Per-call spend cap for web research |
 | `CHUNK_CHARS` | `120000` | Max characters per extraction chunk |
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 | `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |

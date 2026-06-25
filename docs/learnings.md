@@ -267,6 +267,21 @@ parent happened to be launched*, which is invisible and non-reproducible.
   drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
   parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
 
+## Give an agent the web by toggling its tools, not by wiring a search API
+Claude Code already ships `WebSearch` + `WebFetch` tools, so "research the web" needs no third-party
+search API or key — run a headless `claude -p` with `--allowed-tools "WebSearch WebFetch"` and have it
+return structured JSON. Scope it by *also* disallowing edit/shell tools so the agent can only **read**
+the web, never act on what it finds (web pages are untrusted — treat returned titles/URLs as data, and
+keep results review-only).
+- **Why it came up:** the "Use Internet for Research" feature mines Reddit/forums for requested
+  features; the same `spawnClaude` + JSON-repair path as transcript extraction worked, just with the
+  tool allowlist flipped from "deny web/edits" (Implement) to "allow web, deny edits".
+- **Caveat:** `WebSearch` availability is account/region-dependent and can't be detected statically (it's
+  a tool, not a CLI flag) — plan a `WebFetch`-only fallback / clear error, and gate behind a budget cap.
+- **Takeaway:** an agent's capabilities are a *tool-allowlist* decision. Reuse one spawn path and vary
+  `--allowed-tools`/`--disallowed-tools` to get read-only-plan, sandboxed-edit, or web-research modes —
+  no new integration per capability.
+
 ## Sandbox an autonomous file-writing agent in a git worktree + branch
 To let an AI agent edit a repo without risking the working copy, run it inside a fresh
 `git worktree add -b <branch> <tmpdir> HEAD` — an isolated checkout of the same commit. The agent
