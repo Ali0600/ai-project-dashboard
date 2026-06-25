@@ -2,9 +2,10 @@
 
 # AI Project Dashboard
 
-Visualizes Claude Code conversations as per-project Kanban boards + Recommendations / Next Steps
-/ Learnings tabs. Extraction is done by Claude itself (no API key) via the `/sync-board` slash
-command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` and
+Visualizes Claude Code conversations as per-project Kanban boards + **Suggestions** / **Learnings**
+tabs. Item kinds are `task` / `suggestion` / `learning` (the old `recommendation` + `next_step` were
+merged into `suggestion`). Extraction is done by Claude itself (no API key) via the `/sync-board`
+slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` and
 `docs/learnings.md`.
 
 ## Architecture
@@ -13,22 +14,31 @@ command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` a
 - `src/lib/` — `db.ts` (better-sqlite3 + inline schema + guarded column migrations),
   `transcripts.ts` (streaming parse/clean/checkpoint; has Vitest tests), `claude.ts`
   (`spawnClaude` → extraction, `implementPlan`, `assignPriorities`; JSON repair), `store.ts`
-  (all CRUD + `hasUnscannedActivity`), `ingest.ts` (dedup/tombstone/completion), `scan.ts`
-  (read → extract → ingest), `priority.ts` (zod-free priority consts), `format.ts`
-  (deterministic dates), `types.ts` (zod contract + row types; re-exports priority).
-- `src/app/api/` — `items` (POST create), `items/[id]` (PATCH: status / priority / confirm /
+  (all CRUD + `hasUnscannedActivity` + fuzzy-match helpers), `ingest.ts` (dedup/tombstone/completion),
+  `scan.ts` (read → extract → ingest; `onProgress` streaming), `plans.ts` (plan-file backlog parse),
+  `priority.ts` (zod-free priority consts), `format.ts` (deterministic dates), `types.ts` (zod
+  contract + row types; re-exports priority).
+- `src/app/api/` — `items` (POST create), `items/[id]` (PATCH: status / priority / promote / confirm /
   dismiss), `items/[id]/implement` (POST: draft plan), `projects/[id]/items` (GET: client refetch),
-  `conversations/[id]/scan` (POST).
+  `conversations/[id]/scan` (POST: streams NDJSON progress; `{full:true}` = full re-read).
 - `src/app/` pages are server components reading the DB directly (`force-dynamic`).
   `src/components/` — `ProjectDashboard` owns all item state; `KanbanBoard` / `ItemList` /
-  `ItemDetail` (modal) are controlled; plus `PriorityPill`, `AddTaskForm`, `SourceLine`.
+  `ItemDetail` (modal) are controlled; plus `PriorityPill`, `AddTaskForm`, `SourceLine`, `CopyButton`.
 - `scripts/` — `backfill.ts`, `prioritize.ts`, `ingest-cli.ts`, `flag-hook.ts`, `install.ts`.
 
 ## Conventions
 
 - All DB writes go through `store.ts` / `ingest.ts` (shared by CLI, hooks, and API) — never
   open the DB ad hoc.
-- De-dup is enforced by `UNIQUE(project_id, kind, norm_key)`; dismissed rows are tombstones.
+- De-dup is enforced by `UNIQUE(project_id, kind, norm_key)`; dismissed rows are tombstones (the
+  project view lists them in a **Dismissed** section with **Restore** → todo).
+- **Fuzzy matching** (`store.ts`): on insert, `findFuzzyDuplicate` drops a task/suggestion that
+  token-**Jaccard**-matches (`titleJaccard` ≥0.6, ≥2 shared tokens) an existing item across
+  **kinds + all statuses** (so a reworded done/dismissed item can't reappear). Completion detection
+  matches the model's reworded reference by token **containment** (`titleMatchScore`, ≥0.7 +
+  ambiguity guard). A **Full rescan** (scan route `{full:true}`) re-reads the whole transcript so
+  completions in already-scanned content reconcile against current open items. Pick the metric to
+  fit: containment for ref→record, Jaccard for record↔record dedup.
 - Keep the headless instruction in `claude.ts` and `prompts/extract.md` and the `/sync-board`
   command in sync.
 - Mark native packages in `serverExternalPackages` (next.config.ts).

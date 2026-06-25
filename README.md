@@ -4,8 +4,8 @@
 
 Turn your Claude Code conversations into a visual project workspace. The dashboard scans
 your local conversation transcripts and surfaces, per project, a **Kanban task board** plus
-**Recommendations**, **Next Steps**, and **Learnings** — so the suggestions and to‑dos that
-normally scroll away in chat don't get lost.
+**Suggestions** and **Learnings** — so the ideas and to‑dos that normally scroll away in chat
+don't get lost.
 
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash
   command uses your current session; backfill and the dashboard's "Scan" button use headless
@@ -16,9 +16,12 @@ normally scroll away in chat don't get lost.
   `/tmp`) never auto-create projects. The overview lists projects with captured items and tucks
   empty/awaiting-scan folders into a collapsible group.
 - **Completion tracking** — re-scans flag tasks that look finished ("Looks done?") for you to
-  confirm; you can also drag cards across the board.
-- **Act on tasks** — set Urgent/High/Medium/Low priority, add tasks manually, open a card for a
-  detail view, and hit **Implement** to draft a plan (read-only) by resuming the task's source chat.
+  confirm (fuzzy-matched, so reworded mentions still count); a **Full rescan** re-checks completions
+  across all past content. You can also drag cards across the board.
+- **Act on tasks** — set Urgent/High/Medium/Low priority, add tasks manually, open a detail view,
+  **Promote** a suggestion onto the board, **Dismiss** items (restorable from a Dismissed section),
+  copy a task or plan to the clipboard, and hit **Implement** to draft a read-only plan by resuming
+  the task's source chat. Scans stream **live step-by-step progress**.
 
 ![AI Project Dashboard — per-project Kanban board with AI-assigned priorities](docs/screenshot.png)
 
