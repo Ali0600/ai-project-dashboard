@@ -1,42 +1,51 @@
 import Link from "next/link";
 import DeleteProjectButton from "@/components/DeleteProjectButton";
-import { listProjects, type ProjectSummary } from "@/lib/store";
+import PreflightBadge from "@/components/PreflightBadge";
+import type { PreflightReport } from "@/lib/preflight";
+import { listPreflightReports, listProjects, type ProjectSummary } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-function ProjectCard({ p }: { p: ProjectSummary }) {
+function ProjectCard({ p, preflight }: { p: ProjectSummary; preflight: PreflightReport | null }) {
   return (
-    <Link
-      href={`/projects/${p.id}`}
-      className="group rounded-xl border border-black/10 bg-white p-4 transition-colors hover:border-indigo-400 dark:border-white/10 dark:bg-zinc-900 dark:hover:border-indigo-500"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <h2 className="font-semibold leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
-          {p.name}
-        </h2>
-        {p.needs_scan > 0 && (
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
-            {p.needs_scan} to scan
+    <div className="relative">
+      <Link
+        href={`/projects/${p.id}`}
+        className="group block rounded-xl border border-black/10 bg-white p-4 transition-colors hover:border-indigo-400 dark:border-white/10 dark:bg-zinc-900 dark:hover:border-indigo-500"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <h2 className="font-semibold leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+            {p.name}
+          </h2>
+          {p.needs_scan > 0 && (
+            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+              {p.needs_scan} to scan
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-zinc-400" title={p.cwd}>
+          {p.cwd}
+        </p>
+        <div className="mt-4 flex items-center gap-4 text-sm">
+          <span>
+            <span className="text-lg font-bold">{p.open_tasks}</span>{" "}
+            <span className="text-zinc-500">open task{p.open_tasks === 1 ? "" : "s"}</span>
           </span>
-        )}
+          <span className="text-zinc-300 dark:text-zinc-700">·</span>
+          <span className="text-zinc-500">{p.total_items} items</span>
+        </div>
+      </Link>
+      {/* Sibling of the Link (not nested) so clicking the badge re-scans instead of navigating. */}
+      <div className="absolute bottom-3 right-3">
+        <PreflightBadge projectId={p.id} initial={preflight} />
       </div>
-      <p className="mt-0.5 truncate text-xs text-zinc-400" title={p.cwd}>
-        {p.cwd}
-      </p>
-      <div className="mt-4 flex items-center gap-4 text-sm">
-        <span>
-          <span className="text-lg font-bold">{p.open_tasks}</span>{" "}
-          <span className="text-zinc-500">open task{p.open_tasks === 1 ? "" : "s"}</span>
-        </span>
-        <span className="text-zinc-300 dark:text-zinc-700">·</span>
-        <span className="text-zinc-500">{p.total_items} items</span>
-      </div>
-    </Link>
+    </div>
   );
 }
 
 export default function Home() {
   const projects = listProjects();
+  const preflight = listPreflightReports();
   // Only surface folders that actually have captured items; folders that were flagged but never
   // produced anything (or were scanned empty) collapse into a disclosure so they don't clutter.
   const withItems = projects.filter((p) => p.total_items > 0);
@@ -67,7 +76,7 @@ export default function Home() {
           {withItems.length > 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {withItems.map((p) => (
-                <ProjectCard key={p.id} p={p} />
+                <ProjectCard key={p.id} p={p} preflight={preflight[p.id]?.report ?? null} />
               ))}
             </div>
           ) : (

@@ -11,6 +11,7 @@ import type {
   ProjectRow,
 } from "./types";
 import type { TranscriptMeta } from "./transcripts";
+import type { PreflightReport } from "./preflight";
 
 /** Normalize a title into a stable de-dup key. */
 export function normalizeTitle(s: string): string {
@@ -172,6 +173,46 @@ export function getProjectByCwd(cwd: string): ProjectRow | undefined {
 /** Delete a project and (via ON DELETE CASCADE) its conversations + items. */
 export function deleteProject(id: number): void {
   getDb().prepare("DELETE FROM projects WHERE id = ?").run(id);
+}
+
+/* ------------------------------ preflight cache --------------------------- */
+
+interface PreflightRow {
+  project_id: number;
+  report: string;
+  fetched_at: number;
+}
+
+/** Cached Preflight Report row for a project (raw JSON + epoch-ms fetch time), or undefined. */
+export function getPreflightReport(projectId: number): { report: string; fetched_at: number } | undefined {
+  return getDb()
+    .prepare("SELECT report, fetched_at FROM preflight_reports WHERE project_id = ?")
+    .get(projectId) as { report: string; fetched_at: number } | undefined;
+}
+
+/** Upsert a project's cached Preflight Report (one row per project). */
+export function savePreflightReport(projectId: number, report: string, fetchedAt: number): void {
+  getDb()
+    .prepare(
+      "INSERT OR REPLACE INTO preflight_reports (project_id, report, fetched_at) VALUES (?, ?, ?)",
+    )
+    .run(projectId, report, fetchedAt);
+}
+
+/** All cached Preflight Reports, parsed, keyed by project id — for server-side card rendering. */
+export function listPreflightReports(): Record<number, { report: PreflightReport; fetched_at: number }> {
+  const rows = getDb()
+    .prepare("SELECT project_id, report, fetched_at FROM preflight_reports")
+    .all() as PreflightRow[];
+  const out: Record<number, { report: PreflightReport; fetched_at: number }> = {};
+  for (const r of rows) {
+    try {
+      out[r.project_id] = { report: JSON.parse(r.report) as PreflightReport, fetched_at: r.fetched_at };
+    } catch {
+      /* skip a corrupt cached row */
+    }
+  }
+  return out;
 }
 
 /* ------------------------------ conversations ---------------------------- */

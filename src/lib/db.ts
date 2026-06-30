@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE INDEX IF NOT EXISTS idx_items_project       ON items(project_id);
 CREATE INDEX IF NOT EXISTS idx_items_conversation  ON items(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_project        ON conversations(project_id);
+
+-- Cached Preflight dependency-scan Report per project (one row; refreshed on a 24h TTL by the
+-- /api/preflight route). Stored as raw JSON so the Report shape can evolve with Preflight.
+CREATE TABLE IF NOT EXISTS preflight_reports (
+  project_id  INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  report      TEXT NOT NULL,
+  fetched_at  INTEGER NOT NULL
+);
 `;
 
 let _db: Database.Database | null = null;
