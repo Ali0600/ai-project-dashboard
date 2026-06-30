@@ -49,6 +49,10 @@ and to‑dos that normally scroll away in chat don't get lost.
 - **"Use Internet for Research"** — a headless `claude -p` with **WebSearch/WebFetch enabled**
   (edit/shell disabled) mines Reddit, forums, and the wider web for features people are *requesting*
   for projects like yours, then ingests them as deduped, source-linked ideas in a **Research** tab.
+- **Dependency-health badges** — integrates an external [Preflight](https://preflight-web.vercel.app)
+  scanner *as a service* (keyless `POST /api/scan`): reads each project's local manifest, caches the
+  `Report` in SQLite (24h TTL), and shows a CVE/malware badge on every card — Preflight stays the
+  single source, so its improvements appear with zero dashboard changes.
 - **Tested & CI-gated** — Vitest unit tests for the streaming transcript parser; GitHub Actions runs
   typecheck · lint · test · build on every push.
 
@@ -130,6 +134,7 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 | `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |
 | `DASHBOARD_FORCE_SUBSCRIPTION_AUTH` | `0` | Set `1` to strip inherited `ANTHROPIC_*` from spawned `claude` runs, forcing your persistent login (avoids 401s from an expired inherited token) |
+| `PREFLIGHT_URL` | _(unset)_ | Base URL of a [Preflight](https://preflight-web.vercel.app) dependency-scanner (keyless `POST /api/scan`). When set, project cards show a CVE/malware badge. e.g. `https://preflight-web.vercel.app` or `http://localhost:3000` |
 
 ## Docker
 

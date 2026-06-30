@@ -23,6 +23,7 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   dismiss), `items/[id]/implement` (POST: draft read-only plan), `items/[id]/apply` (POST: apply on a
   branch), `projects/[id]` (DELETE: remove project + cascade), `projects/[id]/items` (GET: client
   refetch), `projects/[id]/research` (POST: streams NDJSON; web-research → `research` items),
+  `preflight` (GET `?projectId=`: dependency-health Report from the Preflight service, cached 24h),
   `conversations/[id]/scan` (POST: streams NDJSON progress; `{full:true}` = full re-read).
 - `src/app/` pages are server components reading the DB directly (`force-dynamic`).
   `src/components/` — `ProjectDashboard` owns all item state; `KanbanBoard` / `ItemList` /
@@ -76,6 +77,13 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   so it never resurfaces tracked work. The research route streams NDJSON like scan. Query auto-derived
   via `deriveResearchTopic` but editable. Budget/model via `CLAUDE_RESEARCH_BUDGET_USD` /
   `CLAUDE_RESEARCH_MODEL`. **WebSearch availability is account-dependent** — degrade to WebFetch / clear error.
+- **Preflight integration** (`lib/preflight.ts`, `/api/preflight`): treats the external **Preflight**
+  service as the single source of dependency-health truth (keyless `POST $PREFLIGHT_URL/api/scan`,
+  health at `/api/health`). Reads each project's manifests from its **local `cwd`** (we store local
+  paths, not GitHub repos — so no token), POSTs `{files:{…}}`, caches the `Report` in
+  `preflight_reports` (one row/project, raw JSON) for **24h**, and renders `summary.cve/malware` via
+  `PreflightBadge` on the overview cards. `PREFLIGHT_URL` is env-only (gitignored). The `Report` shape
+  lives with Preflight, so we keep our types tolerant (`[k:string]: unknown`) and never copy its UI.
 - Priority is stored as an INTEGER rank (1=urgent…4=low); consts live in `priority.ts` (no zod).
 - Pass a stable `useId()` to `<DndContext id=…>` (avoids hydration mismatch); format dates via
   `lib/format.ts` (locale-free) for the same reason.

@@ -267,6 +267,21 @@ parent happened to be launched*, which is invisible and non-reproducible.
   drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
   parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
 
+## Adapt a copy-paste integration to the host app's real model — don't paste it verbatim
+A vendor/companion "drop-in" integration snippet encodes the *other* app's assumptions. Preflight's
+doc fetched each project's manifest **from GitHub** (`api.github.com/repos/<owner>/<name>/contents/…`)
+and opened its own DB (`new Database('data.db')`). Pasted as-is into this dashboard it would have
+**broken twice**: our `projects` store **local `cwd` paths, not GitHub repos** (so there's no
+`owner/name` to fetch), and our convention is one shared `getDb()` (a second `data.db` would be a
+split-brain DB). The fix was to keep the *contract* (the `POST /api/scan` request/response) and swap
+the *plumbing*: read manifests from the local `cwd`, persist via the existing `store.ts`/`getDb()`.
+- **Why it came up:** the relayed integration doc assumed a GitHub-repo data model this app never had.
+- **Takeaway:** treat an integration doc as a **contract spec, not code** — verify each assumption
+  against the host's real schema/conventions (how it identifies entities, how it persists) and rewire
+  the data-fetch/storage to match. Also: consume the partner as a **service behind a 24h cache**
+  (cache-aside) so its `Report` shape can evolve without touching you, and keep your types tolerant
+  (`[k: string]: unknown`) rather than mirroring its internal model.
+
 ## A deny-list of named capabilities breaks when a name drifts — prefer an allow-list
 Restricting a tool by **naming what to forbid** (`--disallowed-tools "Write Edit MultiEdit …"`)
 couples you to exact capability names. When `MultiEdit` was merged into `Edit` in a newer Claude
