@@ -81,9 +81,11 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   service as the single source of dependency-health truth (keyless `POST $PREFLIGHT_URL/api/scan`,
   health at `/api/health`). Reads each project's manifests from its **local `cwd`** (we store local
   paths, not GitHub repos — so no token), POSTs `{files:{…}}`, caches the `Report` in
-  `preflight_reports` (one row/project, raw JSON) for **24h**, and renders `summary.cve/malware` +
-  flagged findings via `PreflightPanel` — a click-to-expand **"Scan deps"** panel above the board on
-  the **project page** (`projects/[id]`). `PREFLIGHT_URL` is env-only (gitignored). The `Report` shape
+  `preflight_reports` (one row/project, raw JSON) for **24h** — but that cache is an instant-render
+  seed + offline fallback: `PreflightPanel` **revalidates on open** (forces `?refresh=1`), so a
+  Preflight redeploy shows on the next open instead of waiting out the TTL. Renders `summary.cve/malware`
+  + flagged findings in a click-to-expand **"Scan deps"** panel above the board on the **project page**
+  (`projects/[id]`). `PREFLIGHT_URL` is env-only (gitignored). The `Report` shape
   lives with Preflight, so we keep our types tolerant (`[k:string]: unknown`) and never copy its UI.
 - Priority is stored as an INTEGER rank (1=urgent…4=low); consts live in `priority.ts` (no zod).
 - Pass a stable `useId()` to `<DndContext id=…>` (avoids hydration mismatch); format dates via

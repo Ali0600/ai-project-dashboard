@@ -4,8 +4,6 @@ import { useState } from "react";
 // type-only import — erased at build, so lib/preflight's node deps never reach the client bundle
 import type { PreflightReport } from "@/lib/preflight";
 
-const TTL_MS = 24 * 60 * 60 * 1000; // matches the /api/preflight cache TTL
-
 /** Coarse "Xh ago" label. Client-only (computed on render inside the opened panel — no SSR). */
 function relativeTime(ts: number): string {
   const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -85,10 +83,11 @@ export default function PreflightPanel({
   function toggle() {
     const next = !open;
     setOpen(next);
-    if (!next || busy) return;
-    // Lazy-load on first open; auto-refresh a cached Report that's aged past the TTL.
-    if (!report) load(false);
-    else if (fetchedAt != null && Date.now() - fetchedAt >= TTL_MS) load(false);
+    // Revalidate against live Preflight on every open (stale-while-revalidate): the cached Report
+    // renders instantly while this forced re-scan runs in the background, then updates in place — so
+    // a Preflight redeploy shows up on the next open instead of waiting out the 24h cache. load()'s
+    // own `busy` guard prevents overlapping scans.
+    if (next) load(true);
   }
 
   const summary = report?.summary ?? {};
