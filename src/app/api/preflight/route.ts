@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import {
-  hasScannableManifest,
+  collectManifestGroups,
+  mergeReports,
+  type PreflightReport,
   preflightUrl,
-  readLocalManifests,
   scanFiles,
 } from "@/lib/preflight";
 import { getPreflightReport, getProject, savePreflightReport } from "@/lib/store";
@@ -15,10 +16,11 @@ const TTL = 24 * 60 * 60 * 1000; // cache a project's Report for 24h
 /**
  * GET /api/preflight?projectId=<id>[&refresh=1]
  *
- * Returns a project's dependency-health Report. Reads the project's manifests from its local `cwd`,
- * sends them to Preflight's keyless `POST /api/scan`, and caches the Report in SQLite for 24h.
- * `refresh=1` forces a re-scan. On a Preflight outage we fall back to the (stale) cached Report when
- * we have one, so a card degrades gracefully instead of erroring.
+ * Returns a project's dependency-health Report. Finds the project's manifests under its local `cwd`
+ * (root + shallow subdirs, so monorepos work), scans each ecosystem group via Preflight's keyless
+ * `POST /api/scan`, merges the results into one Report, and caches it in SQLite for 24h. `refresh=1`
+ * forces a re-scan. On a Preflight outage we fall back to the (stale) cached Report when we have one,
+ * so the panel degrades gracefully instead of erroring.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -38,13 +40,22 @@ export async function GET(req: Request) {
     return NextResponse.json({ report: JSON.parse(cached.report), cached: true, fetched_at: cached.fetched_at });
   }
 
-  const files = readLocalManifests(project.cwd);
-  if (!hasScannableManifest(files)) {
+  const groups = collectManifestGroups(project.cwd);
+  if (groups.length === 0) {
     return NextResponse.json({ skipped: true, reason: "no package.json/requirements.txt in project" });
   }
 
   try {
-    const report = await scanFiles(files);
+    // One /api/scan per ecosystem group (Preflight scans one ecosystem per call); merge into one
+    // Report. allSettled so a monorepo still shows the ecosystems that succeed if one errors.
+    const settled = await Promise.allSettled(groups.map((g) => scanFiles(g)));
+    const reports: PreflightReport[] = [];
+    for (const s of settled) if (s.status === "fulfilled") reports.push(s.value);
+    if (reports.length === 0) {
+      const rejected = settled.find((s) => s.status === "rejected") as PromiseRejectedResult | undefined;
+      throw new Error(rejected?.reason?.message ?? "Preflight scan failed");
+    }
+    const report = mergeReports(reports);
     const fetched_at = Date.now();
     savePreflightReport(projectId, JSON.stringify(report), fetched_at);
     return NextResponse.json({ report, cached: false, fetched_at });

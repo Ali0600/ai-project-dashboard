@@ -39,14 +39,22 @@ export interface PreflightReport {
   [k: string]: unknown;
 }
 
-/** Dependency manifests (+ lockfiles) we send to Preflight, in priority order. */
-const MANIFEST_FILES = [
-  "package.json",
-  "package-lock.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "requirements.txt",
-] as const;
+/** A package.json's lockfile is taken from the same directory as the package.json. */
+const NPM_LOCKFILES = ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"] as const;
+const SKIP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  "out",
+  "vendor",
+  "venv",
+  ".venv",
+  "__pycache__",
+  ".turbo",
+  "coverage",
+]);
+const MAX_SEARCH_DEPTH = 2; // root + up to 2 nested levels (monorepos: mobile/+backend/, packages/web/)
 
 /** Configured Preflight base URL (trailing slash trimmed), or null when unset. */
 export function preflightUrl(): string | null {
@@ -54,22 +62,66 @@ export function preflightUrl(): string | null {
   return u ? u.replace(/\/+$/, "") : null;
 }
 
-/** Read whatever dependency manifests exist in a project's local working directory. */
-export function readLocalManifests(cwd: string): Record<string, string> {
-  const files: Record<string, string> = {};
-  for (const name of MANIFEST_FILES) {
+/** Files for ONE ecosystem scan: a package.json (+ its lockfile), or a requirements.txt. */
+export type ManifestGroup = Record<string, string>;
+
+const MAX_GROUPS = 8; // bound the number of /api/scan calls for a large monorepo
+
+/**
+ * Collect dependency-manifest groups for a project — one per ecosystem occurrence. Checks the root,
+ * then shallow subdirectories, so a monorepo's nested manifests are each found and scanned separately
+ * (Preflight scans one ecosystem per call). E.g. grocery-helper → [{mobile/package.json + lockfile},
+ * {backend/requirements.txt}]. Skips node_modules, build output, and hidden dirs.
+ */
+export function collectManifestGroups(cwd: string): ManifestGroup[] {
+  const groups: ManifestGroup[] = [];
+  const queue: Array<{ dir: string; depth: number }> = [{ dir: cwd, depth: 0 }];
+
+  while (queue.length > 0 && groups.length < MAX_GROUPS) {
+    const { dir, depth } = queue.shift()!;
+    let entries: fs.Dirent[];
     try {
-      files[name] = fs.readFileSync(path.join(cwd, name), "utf8");
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
-      /* not present in this project — skip */
+      continue;
+    }
+    const fileNames = new Set(entries.filter((e) => e.isFile()).map((e) => e.name));
+    const read = (name: string): string | null => {
+      try {
+        return fs.readFileSync(path.join(dir, name), "utf8");
+      } catch {
+        return null;
+      }
+    };
+
+    if (fileNames.has("package.json")) {
+      const pkg = read("package.json");
+      if (pkg != null) {
+        const group: ManifestGroup = { "package.json": pkg };
+        for (const lock of NPM_LOCKFILES) {
+          const content = fileNames.has(lock) ? read(lock) : null;
+          if (content != null) {
+            group[lock] = content;
+            break; // one lockfile per package.json
+          }
+        }
+        groups.push(group);
+      }
+    }
+    if (fileNames.has("requirements.txt")) {
+      const req = read("requirements.txt");
+      if (req != null) groups.push({ "requirements.txt": req });
+    }
+
+    if (depth < MAX_SEARCH_DEPTH) {
+      for (const e of entries) {
+        if (e.isDirectory() && !e.name.startsWith(".") && !SKIP_DIRS.has(e.name)) {
+          queue.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+        }
+      }
     }
   }
-  return files;
-}
-
-/** Preflight can only scan when there's a primary manifest (lockfiles alone aren't enough). */
-export function hasScannableManifest(files: Record<string, string>): boolean {
-  return Boolean(files["package.json"] || files["requirements.txt"]);
+  return groups;
 }
 
 /** POST manifests to Preflight's keyless `/api/scan` and return the parsed Report. */
@@ -100,21 +152,24 @@ export async function preflightHealthy(): Promise<boolean> {
   }
 }
 
-/** Headline counts for a card badge: CVEs, malware, and how many deps were flagged (not "safe"). */
-export function reportHeadline(report: PreflightReport): {
-  cve: number;
-  malware: number;
-  flagged: number;
-  total: number;
-} {
-  const cve = report.summary?.cve ?? 0;
-  const malware = report.summary?.malware ?? 0;
-  const total = report.total ?? report.findings?.length ?? 0;
-  const safe = report.summary?.safe ?? 0;
-  // "flagged" = anything Preflight didn't mark safe (cve/malware/stale/…); fall back to total - safe.
-  const flagged = Math.max(
-    cve + malware,
-    report.findings ? report.findings.filter((f) => f.verdict && f.verdict !== "safe").length : total - safe,
-  );
-  return { cve, malware, flagged, total };
+/**
+ * Merge several single-ecosystem Reports (one per manifest group in a monorepo) into one combined
+ * health view: summary counts summed, findings concatenated, ecosystems joined. Returns the sole
+ * Report unchanged when there's only one.
+ */
+export function mergeReports(reports: PreflightReport[]): PreflightReport {
+  if (reports.length === 1) return reports[0];
+  const summary: PreflightSummary = {};
+  const findings: PreflightFinding[] = [];
+  const ecosystems = new Set<string>();
+  let total = 0;
+  for (const r of reports) {
+    if (r.ecosystem) ecosystems.add(r.ecosystem);
+    total += r.total ?? r.findings?.length ?? 0;
+    for (const [k, v] of Object.entries(r.summary ?? {})) {
+      if (typeof v === "number") summary[k] = (summary[k] ?? 0) + v;
+    }
+    if (Array.isArray(r.findings)) findings.push(...r.findings);
+  }
+  return { ecosystem: [...ecosystems].join(" + "), total, summary, findings };
 }
