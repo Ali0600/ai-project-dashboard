@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import DeleteProjectButton from "@/components/DeleteProjectButton";
+import PreflightPanel from "@/components/PreflightPanel";
 import ProjectDashboard from "@/components/ProjectDashboard";
+import type { PreflightReport } from "@/lib/preflight";
 import {
   deriveResearchTopic,
+  getPreflightReport,
   getProject,
   hasUnscannedActivity,
   listConversations,
@@ -20,6 +23,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const items = listItemsWithSource(project.id);
   const conversations = listConversations(project.id);
   const pendingIds = conversations.filter(hasUnscannedActivity).map((c) => c.id);
+  const pfRow = getPreflightReport(project.id);
+  const preflightInitial: PreflightReport | null = pfRow
+    ? (JSON.parse(pfRow.report) as PreflightReport)
+    : null;
 
   return (
     <div>
@@ -42,6 +49,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           />
         </div>
       </div>
+
+      <PreflightPanel projectId={project.id} initial={preflightInitial} />
 
       <ProjectDashboard
         initialItems={items}

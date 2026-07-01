@@ -51,8 +51,9 @@ and to‑dos that normally scroll away in chat don't get lost.
   for projects like yours, then ingests them as deduped, source-linked ideas in a **Research** tab.
 - **Dependency-health badges** — integrates an external [Preflight](https://preflight-web.vercel.app)
   scanner *as a service* (keyless `POST /api/scan`): reads each project's local manifest, caches the
-  `Report` in SQLite (24h TTL), and shows a CVE/malware badge on every card — Preflight stays the
-  single source, so its improvements appear with zero dashboard changes.
+  `Report` in SQLite (24h TTL), and surfaces it via a **"Scan deps"** panel on the project page
+  (CVE/malware counts + flagged findings) — Preflight stays the single source, so its improvements
+  appear with zero dashboard changes.
 - **Tested & CI-gated** — Vitest unit tests for the streaming transcript parser; GitHub Actions runs
   typecheck · lint · test · build on every push.
 
