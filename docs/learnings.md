@@ -267,6 +267,20 @@ parent happened to be launched*, which is invisible and non-reproducible.
   drop the ambient vars that could poison it — so its behaviour is deterministic regardless of the
   parent's launch context. Gate the stripping behind a flag if some users legitimately rely on those vars.
 
+## An external "single source" analyzer may only handle one unit per call — discover, fan out, merge
+Delegating to an external service as the single source of truth doesn't mean one call covers a
+*composite* input. Two traps hit at once here: (1) we looked for manifests only at the repo **root**, so
+a monorepo showed "no manifest"; (2) once found, Preflight's `/api/scan` scans exactly **one ecosystem
+per call** — sending a `package.json` **and** a `requirements.txt` together returned only PyPI (13 deps),
+silently hiding 943 npm deps **and 2 CVEs**.
+- **Why it came up:** grocery-helper (Expo `mobile/` + FastAPI `backend/`) — nested manifests + two
+  ecosystems. Fix: BFS shallow subdirs for manifests, then one scan **per ecosystem group** and merge
+  (sum summaries, concat findings) → 956 deps, 2 CVEs surfaced.
+- **Takeaway:** (1) discover inputs where they actually live — search subdirs, don't assume the root
+  (monorepos nest under `mobile/`, `backend/`, `packages/*`). (2) **Probe the service's real behavior on a
+  composite input** before trusting it; if it's one-unit-per-call, fan out and merge rather than shipping a
+  misleadingly-partial (and falsely reassuring) result.
+
 ## Adapt a copy-paste integration to the host app's real model — don't paste it verbatim
 A vendor/companion "drop-in" integration snippet encodes the *other* app's assumptions. Preflight's
 doc fetched each project's manifest **from GitHub** (`api.github.com/repos/<owner>/<name>/contents/…`)

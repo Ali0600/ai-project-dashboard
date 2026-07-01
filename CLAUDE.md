@@ -79,8 +79,10 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   `CLAUDE_RESEARCH_MODEL`. **WebSearch availability is account-dependent** — degrade to WebFetch / clear error.
 - **Preflight integration** (`lib/preflight.ts`, `/api/preflight`): treats the external **Preflight**
   service as the single source of dependency-health truth (keyless `POST $PREFLIGHT_URL/api/scan`,
-  health at `/api/health`). Reads each project's manifests from its **local `cwd`** (we store local
-  paths, not GitHub repos — so no token), POSTs `{files:{…}}`, caches the `Report` in
+  health at `/api/health`). Finds manifests under each project's **local `cwd`** (root + shallow
+  subdirs → **monorepos work**; no token — we store local paths, not GitHub repos), scans **each
+  ecosystem group separately and merges** (`collectManifestGroups` + `mergeReports` — Preflight scans
+  one ecosystem per `POST /api/scan`), caches the merged `Report` in
   `preflight_reports` (one row/project, raw JSON) for **24h** — but that cache is an instant-render
   seed + offline fallback: `PreflightPanel` **revalidates on open** (forces `?refresh=1`), so a
   Preflight redeploy shows on the next open instead of waiting out the TTL. Renders `summary.cve/malware`
