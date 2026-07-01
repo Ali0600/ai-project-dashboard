@@ -50,7 +50,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      <PreflightPanel projectId={project.id} initial={preflightInitial} />
+      <PreflightPanel
+        projectId={project.id}
+        initial={preflightInitial}
+        initialFetchedAt={pfRow?.fetched_at ?? null}
+      />
 
       <ProjectDashboard
         initialItems={items}
