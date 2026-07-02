@@ -373,3 +373,17 @@ of the user's activity, not just what they care about — flooding the system wi
 - **Takeaway:** make broad event-driven capture opt-in — act only on entities the user has explicitly
   enrolled (allowlist / "already known") and filter transient/system sources — rather than capturing
   everything and making the user prune. This is the complement of "don't capture your own subprocesses."
+
+## Retiring a value from a polymorphic `kind` column is a coordinated sweep + data migration
+Deleting one member of a shared enum (`items.kind`) is not a one-line change: it touches every layer
+that enumerates the kind — the LLM extraction contract, the zod schema, ingest, the dedup rules, and
+the UI tabs — plus a migration to purge rows that already carry the retired value.
+- **Why it came up:** dropped the `learning` item kind (it duplicated `docs/learnings.md` /
+  `~/.claude/lessons.md` and wasn't actionable). The edit spanned the 3 synced contract copies
+  (`claude.ts` INSTRUCTION + `prompts/extract.md` + `sync-board.md`), `ITEM_KINDS`/zod, `ingest`,
+  `dupKinds`, the tab list, and an idempotent `DELETE FROM items WHERE kind='learning'` migration
+  (130 live rows) — verified with a before/after `GROUP BY kind` audit around a WAL-safe backup.
+- **Takeaway:** narrow the source-of-truth constant first and let the compiler (exhaustive
+  `Record<Kind,…>` / switches) point you at every call site; ship the removal *with* an idempotent
+  migration that deletes/converts existing rows, and confirm the row distribution before→after. Pairs
+  with "every kind-specific operation must filter by `kind`."
