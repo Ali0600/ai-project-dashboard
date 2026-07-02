@@ -133,6 +133,11 @@ function migrate(db: Database.Database): void {
     `UPDATE items SET suggested_done = 0, done_evidence = NULL WHERE suggested_done = 1 AND kind <> 'task';`,
   );
 
+  // The `learning` item kind was removed: the board is for actionable triage (tasks / suggestions /
+  // research), and learnings live in docs/learnings.md + ~/.claude/lessons.md. Drop any existing
+  // learning rows. Idempotent — a no-op once none remain.
+  db.exec(`DELETE FROM items WHERE kind = 'learning';`);
+
   // Backfill blank conversation titles (legacy/empty rows) so source lines and any future
   // per-conversation filter aren't empty. New titles come from the scan path going forward.
   db.exec(

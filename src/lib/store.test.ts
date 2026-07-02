@@ -127,15 +127,13 @@ describe("hasUnscannedActivity", () => {
   });
 });
 
-describe("flagSuggestedDone is task-only (completion can't land on a learning/suggestion)", () => {
-  it("flags a matching task but never a learning/suggestion", () => {
+describe("flagSuggestedDone is task-only (completion can't land on a suggestion)", () => {
+  it("flags a matching task but never a suggestion", () => {
     const p = getOrCreateProject("/tmp/store-test-flag");
     insertItem({ projectId: p.id, kind: "task", title: "Deploy to Render" });
-    insertItem({ projectId: p.id, kind: "learning", title: "Stream large files with readline" });
     insertItem({ projectId: p.id, kind: "suggestion", title: "Pin the GitHub repo" });
 
-    // A completion reference whose words match only a learning/suggestion must NOT flag anything.
-    expect(flagSuggestedDone(p.id, "Stream large files with readline", "ev")).toBe(false);
+    // A completion reference whose words match only a suggestion must NOT flag anything.
     expect(flagSuggestedDone(p.id, "Pin the GitHub repo", "ev")).toBe(false);
     // The task is still flaggable.
     expect(flagSuggestedDone(p.id, "Deploy to Render", "ev")).toBe(true);
@@ -146,19 +144,14 @@ describe("flagSuggestedDone is task-only (completion can't land on a learning/su
   });
 });
 
-describe("insertItem fuzzy-dedups learnings (only against other learnings)", () => {
-  it("drops a reworded learning but keeps one that only overlaps a task", () => {
-    const p = getOrCreateProject("/tmp/store-test-learn-dedup");
-    const first = insertItem({ projectId: p.id, kind: "learning", title: "Stream large files with readline" });
+describe("insertItem fuzzy-dedups suggestions", () => {
+  it("drops a reworded suggestion that matches an existing one", () => {
+    const p = getOrCreateProject("/tmp/store-test-sugg-dedup");
+    const first = insertItem({ projectId: p.id, kind: "suggestion", title: "Stream large files with readline" });
     expect(first).not.toBeNull();
     // Same token set, reworded → deduped.
-    const reworded = insertItem({ projectId: p.id, kind: "learning", title: "Stream large files using readline" });
+    const reworded = insertItem({ projectId: p.id, kind: "suggestion", title: "Stream large files using readline" });
     expect(reworded).toBeNull();
-
-    // A learning that shares all its tokens with a TASK is NOT deduped (cross-kind isolation).
-    insertItem({ projectId: p.id, kind: "task", title: "Configure CI caching" });
-    const learning = insertItem({ projectId: p.id, kind: "learning", title: "Configure CI caching" });
-    expect(learning).not.toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@
 import type { ItemStatus, ItemWithSource } from "@/lib/types";
 import SourceLine from "./SourceLine";
 
-/** Generic list for suggestions / learnings. */
+/** Generic list for suggestions / research. */
 export default function ItemList({
   items,
   emptyLabel,

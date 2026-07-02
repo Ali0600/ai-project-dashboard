@@ -343,19 +343,17 @@ export function insertItem(a: InsertItemArgs): number | null {
   if (a.kind === "suggestion" && taskExistsWithKey(a.projectId, normKey)) return null;
   // Fuzzy dedup (any status — incl. done/dismissed) so a reworded version doesn't reappear on a
   // re-scan. A suggestion also dedups against TASKS (precedence task > suggestion), so "add
-  // EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task. Learnings dedup
-  // only against other learnings. Research ideas dedup against task+suggestion+research so the web
-  // flow never resurfaces already-tracked work or repeats an idea across runs.
+  // EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task. Research ideas
+  // dedup against task+suggestion+research so the web flow never resurfaces already-tracked work
+  // or repeats an idea across runs.
   const dupKinds: ItemKind[] | null =
     a.kind === "suggestion"
       ? ["task", "suggestion"]
       : a.kind === "task"
         ? ["task"]
-        : a.kind === "learning"
-          ? ["learning"]
-          : a.kind === "research"
-            ? ["task", "suggestion", "research"]
-            : null;
+        : a.kind === "research"
+          ? ["task", "suggestion", "research"]
+          : null;
   if (dupKinds && findFuzzyDuplicate(a.projectId, dupKinds, a.title)) return null;
 
   const info = db
@@ -545,7 +543,7 @@ export function saveApplyResult(id: number, branch: string | null, diff: string 
 export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence: string): boolean {
   const db = getDb();
   let row: ItemRow | undefined;
-  // Completion ("Looks done?") is a task-only concept — a learning or suggestion can't be "done".
+  // Completion ("Looks done?") is a task-only concept — a suggestion can't be "done".
   // Scope every lookup to kind='task' so a `completed[]` reference can't flag a non-task row.
   if (/^\d+$/.test(idOrTitle)) {
     row = db.prepare("SELECT * FROM items WHERE id = ? AND project_id = ? AND kind = 'task'").get(

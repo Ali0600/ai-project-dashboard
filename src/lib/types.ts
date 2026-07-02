@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** The kinds of things we track. `research` items come from the web-research flow, not transcripts. */
-export const ITEM_KINDS = ["task", "suggestion", "learning", "research"] as const;
+export const ITEM_KINDS = ["task", "suggestion", "research"] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
 export const ITEM_STATUSES = ["todo", "in_progress", "done", "dismissed"] as const;
@@ -42,7 +42,6 @@ export const ExtractionResult = z
   .object({
     tasks: z.array(Task).optional().default([]),
     suggestions: z.array(SimpleItem).optional().default([]),
-    learnings: z.array(SimpleItem).optional().default([]),
     completed: z.array(Completed).optional().default([]),
     // Legacy keys from older /sync-board copies — folded into `suggestions` below so a
     // stale global command never silently drops data.

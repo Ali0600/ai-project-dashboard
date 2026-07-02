@@ -10,7 +10,7 @@ import PriorityPill from "./PriorityPill";
 const KIND_LABEL: Record<string, string> = {
   task: "Task",
   suggestion: "Suggestion",
-  learning: "Learning",
+  research: "Research",
 };
 
 const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [

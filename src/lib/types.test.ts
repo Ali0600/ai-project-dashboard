@@ -8,7 +8,6 @@ describe("ExtractionResult", () => {
       recommendations: [{ title: "Consider Y" }],
       next_steps: [{ title: "Then Z" }],
       suggestions: [{ title: "Idea W" }],
-      learnings: [{ title: "TIL" }],
     });
     expect(r.suggestions.map((s) => s.title).sort()).toEqual([
       "Consider Y",
@@ -19,14 +18,12 @@ describe("ExtractionResult", () => {
     expect((r as Record<string, unknown>).recommendations).toBeUndefined();
     expect((r as Record<string, unknown>).next_steps).toBeUndefined();
     expect(r.tasks).toHaveLength(1);
-    expect(r.learnings).toHaveLength(1);
   });
 
   it("defaults missing arrays (including suggestions) to empty", () => {
     const r = ExtractionResult.parse({});
     expect(r.suggestions).toEqual([]);
     expect(r.tasks).toEqual([]);
-    expect(r.learnings).toEqual([]);
     expect(r.completed).toEqual([]);
   });
 });

@@ -10,14 +10,12 @@ import type { ItemKind, ItemStatus, ItemWithSource } from "@/lib/types";
 const TABS: { key: ItemKind; label: string; empty: string }[] = [
   { key: "task", label: "Board", empty: "" },
   { key: "suggestion", label: "Suggestions", empty: "No suggestions captured yet." },
-  { key: "learning", label: "Learnings", empty: "No learnings captured yet." },
   { key: "research", label: "Research", empty: 'No research yet — click "Use Internet for Research".' },
 ];
 
 const KIND_NOUN: Record<ItemKind, string> = {
   task: "task",
   suggestion: "suggestion",
-  learning: "learning",
   research: "idea",
 };
 

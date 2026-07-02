@@ -47,7 +47,7 @@ export default function Home() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Projects</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          A visual board of tasks, suggestions & learnings from your Claude Code
+          A visual board of tasks & suggestions from your Claude Code
           conversations.
         </p>
       </div>

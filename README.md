@@ -4,7 +4,7 @@
 
 Turn your Claude Code conversations into a visual project workspace. The dashboard scans
 your local conversation transcripts and surfaces, per project, a **Kanban task board** plus
-**Suggestions**, **Learnings**, and **Research** (web-sourced feature ideas) — so the ideas
+**Suggestions** and **Research** (web-sourced feature ideas) — so the ideas
 and to‑dos that normally scroll away in chat don't get lost.
 
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash

@@ -21,7 +21,6 @@ Return ONLY a JSON object (no prose, no markdown fences) with this exact shape:
 {
   "tasks":       [{"title": string, "detail": string, "status_guess": "todo"|"in_progress"|"done", "priority": "urgent"|"high"|"medium"|"low", "source_quote": string}],
   "suggestions": [{"title": string, "detail": string, "source_quote": string}],
-  "learnings":   [{"title": string, "detail": string, "source_quote": string}],
   "completed":   [{"existing_id_or_title": string, "evidence_quote": string}]
 }
 
@@ -29,7 +28,6 @@ Definitions:
 - tasks: concrete, actionable work items for the user to do (things to build, fix, configure, test).
 - priority (tasks only): urgent | high | medium | low — how important/time-sensitive the task is (blockers and security issues = urgent; nice-to-haves = low). Default medium when unsure.
 - suggestions: advice, ideas, or optional next steps the assistant proposed that are NOT already concrete committed tasks ("you should", "I recommend", "consider", "Optional Next Step:").
-- learnings: teachable, transferable concepts worth remembering.
 - completed: items from the EXISTING OPEN ITEMS list below that this conversation shows are now DONE. Use the existing item's exact title (or id) in existing_id_or_title, and quote the evidence.
 
 Rules:
@@ -459,13 +457,11 @@ export function mergeExtractions(parts: ExtractionResult[]): ExtractionResult {
   const merged: ExtractionResult = {
     tasks: [],
     suggestions: [],
-    learnings: [],
     completed: [],
   };
   for (const p of parts) {
     merged.tasks.push(...p.tasks);
     merged.suggestions.push(...p.suggestions);
-    merged.learnings.push(...p.learnings);
     merged.completed.push(...p.completed);
   }
   return merged;

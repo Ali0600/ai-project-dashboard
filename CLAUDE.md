@@ -2,9 +2,10 @@
 
 # AI Project Dashboard
 
-Visualizes Claude Code conversations as per-project Kanban boards + **Suggestions** / **Learnings** /
-**Research** tabs. Item kinds are `task` / `suggestion` / `learning` / `research` (the old
-`recommendation` + `next_step` were merged into `suggestion`; `research` comes from the web-research
+Visualizes Claude Code conversations as per-project Kanban boards + **Suggestions** and
+**Research** tabs. Item kinds are `task` / `suggestion` / `research` (the old `recommendation` +
+`next_step` were merged into `suggestion`; the `learning` kind was removed — learnings live in
+`docs/learnings.md` / `~/.claude/lessons.md`, not the board; `research` comes from the web-research
 flow, not transcripts). Extraction is done by Claude itself (no API key) via the `/sync-board`
 slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` and
 `docs/learnings.md`.

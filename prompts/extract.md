@@ -10,7 +10,6 @@ Return **only** a JSON object with this exact shape:
 {
   "tasks":       [{"title": "", "detail": "", "status_guess": "todo|in_progress|done", "priority": "urgent|high|medium|low", "source_quote": ""}],
   "suggestions": [{"title": "", "detail": "", "source_quote": ""}],
-  "learnings":   [{"title": "", "detail": "", "source_quote": ""}],
   "completed":   [{"existing_id_or_title": "", "evidence_quote": ""}]
 }
 ```
@@ -21,7 +20,6 @@ Return **only** a JSON object with this exact shape:
   `priority`: urgent (blockers/security/broken builds), high, medium (default), low (nice-to-have).
 - **suggestions** — advice, ideas, or optional next steps the assistant proposed that are NOT
   already concrete committed tasks ("you should", "I recommend", "consider", "Optional Next Step:").
-- **learnings** — teachable, transferable concepts worth remembering.
 - **completed** — items from the supplied EXISTING OPEN ITEMS list that the conversation
   shows are now finished. Reference the existing item by its exact title (or id) and quote
   the evidence.

@@ -50,23 +50,17 @@ export function ingestExtraction(opts: {
     // Retire any pre-existing suggestion that a task (including ones just added) now covers.
     dismissSuggestionsCollidingWithTasks(projectId);
 
-    const simple = [
-      ["suggestion", extraction.suggestions],
-      ["learning", extraction.learnings],
-    ] as const;
-    for (const [kind, arr] of simple) {
-      for (const it of arr) {
-        add(
-          insertItem({
-            projectId,
-            conversationId,
-            kind,
-            title: it.title,
-            detail: it.detail,
-            sourceQuote: it.source_quote,
-          }),
-        );
-      }
+    for (const it of extraction.suggestions) {
+      add(
+        insertItem({
+          projectId,
+          conversationId,
+          kind: "suggestion",
+          title: it.title,
+          detail: it.detail,
+          sourceQuote: it.source_quote,
+        }),
+      );
     }
 
     let flaggedDone = 0;
