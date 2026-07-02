@@ -55,6 +55,7 @@ export default function AddTaskForm({
         implementation_plan: null,
         apply_branch: null,
         apply_diff: null,
+        sort_order: 0,
         norm_key: "",
         created_at: now,
         updated_at: now,

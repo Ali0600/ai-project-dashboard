@@ -502,6 +502,21 @@ export function updateItemPriority(id: number, priority: Priority): void {
     .run(PRIORITY_RANK[priority], id);
 }
 
+/**
+ * Persist a Kanban column's manual card order (drag-to-reorder). Writes each task's `sort_order` to
+ * its position in `orderedIds` and sets its `status`, so a card dragged across columns lands and
+ * orders in one write. Scoped to this project's `kind='task'` rows; unknown ids are no-ops.
+ */
+export function reorderTasks(projectId: number, status: ItemStatus, orderedIds: number[]): void {
+  const db = getDb();
+  const stmt = db.prepare(
+    "UPDATE items SET status = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ? AND project_id = ? AND kind = 'task'",
+  );
+  db.transaction(() => {
+    orderedIds.forEach((id, i) => stmt.run(status, i, id, projectId));
+  })();
+}
+
 export interface ItemContext {
   item: ItemRow;
   projectCwd: string;

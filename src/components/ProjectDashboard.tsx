@@ -121,9 +121,22 @@ export default function ProjectDashboard({
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...local } : i)));
     patch(id, body);
   }
-  const moveTask = (id: number, status: ItemStatus) =>
-    update(id, { status, suggested_done: 0 }, { status });
   const setStatus = (id: number, status: ItemStatus) => update(id, { status }, { status });
+  // Drag-to-reorder within/across Kanban columns: apply the target column's new order
+  // optimistically (status + sort_order), then persist. On failure, refetch to resync.
+  const reorder = (status: ItemStatus, orderedIds: number[]) => {
+    const pos = new Map(orderedIds.map((id, i) => [id, i] as const));
+    setItems((prev) =>
+      prev.map((i) => (pos.has(i.id) ? { ...i, status, sort_order: pos.get(i.id)! } : i)),
+    );
+    fetch(`/api/projects/${projectId}/reorder`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status, orderedIds }),
+    }).catch(() => {
+      void refetch();
+    });
+  };
   const confirmDone = (id: number) =>
     update(id, { status: "done", suggested_done: 0 }, { suggestion: "confirm" });
   const dismissSuggestion = (id: number) =>
@@ -515,7 +528,7 @@ export default function ProjectDashboard({
           <KanbanBoard
             tasks={items.filter((i) => i.kind === "task" && matchesQuery(i))}
             recentlyAdded={recentlyAdded}
-            onMove={moveTask}
+            onReorder={reorder}
             onConfirm={confirmDone}
             onDismissSuggestion={dismissSuggestion}
             onPriorityChange={setPriority}

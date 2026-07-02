@@ -11,6 +11,7 @@ import {
   insertItem,
   listItems,
   normalizeTitle,
+  reorderTasks,
   titleJaccard,
   titleMatchScore,
   tokenize,
@@ -203,5 +204,25 @@ describe("collapseDuplicateTasks", () => {
     expect(byTitle("Add EXPO_TOKEN GitHub secret")?.status).toBe("done"); // canonical kept
     expect(byTitle("Add EXPO_TOKEN secret to GitHub")?.status).toBe("dismissed"); // reworded dup
     expect(byTitle("Deploy to Render with monitoring")?.status).toBe("todo"); // distinct, untouched
+  });
+});
+
+describe("reorderTasks writes sort_order per position (and status for cross-column drags)", () => {
+  it("persists the given order and moves a card across columns in one call", () => {
+    const p = getOrCreateProject("/tmp/store-test-reorder");
+    const a = insertItem({ projectId: p.id, kind: "task", title: "Set up deploy pipeline" })!;
+    const b = insertItem({ projectId: p.id, kind: "task", title: "Add barcode scanner feature" })!;
+    const c = insertItem({ projectId: p.id, kind: "task", title: "Write offline sync logic" })!;
+
+    // Order the To Do column as C, A, B → sort_order 0,1,2.
+    reorderTasks(p.id, "todo", [c, a, b]);
+    const pos = Object.fromEntries(listItems(p.id, "task").map((t) => [t.id, t.sort_order]));
+    expect([pos[c], pos[a], pos[b]]).toEqual([0, 1, 2]);
+
+    // Dragging A into Done sets its status and position together.
+    reorderTasks(p.id, "done", [a]);
+    const moved = listItems(p.id, "task").find((t) => t.id === a)!;
+    expect(moved.status).toBe("done");
+    expect(moved.sort_order).toBe(0);
   });
 });

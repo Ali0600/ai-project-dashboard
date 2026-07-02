@@ -114,6 +114,7 @@ export interface ItemRow {
   implementation_plan: string | null;
   apply_branch: string | null;
   apply_diff: string | null;
+  sort_order: number;
   norm_key: string;
   created_at: string;
   updated_at: string;

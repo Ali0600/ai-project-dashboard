@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS items (
   implementation_plan TEXT,
   apply_branch    TEXT,
   apply_diff      TEXT,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
   norm_key        TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -105,6 +106,20 @@ function migrate(db: Database.Database): void {
   ensure("apply_branch", "apply_branch TEXT");
   ensure("apply_diff", "apply_diff TEXT");
   ensure("source_url", "source_url TEXT");
+
+  // Manual within-column ordering: add `sort_order` once, seeding each task's initial position from
+  // the existing (priority ASC, id DESC) order per (project, status) so boards don't reshuffle on
+  // first load. Guarded to the first add so later boots never clobber a user's manual order.
+  if (!cols.includes("sort_order")) {
+    db.exec("ALTER TABLE items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
+    db.exec(`
+      UPDATE items SET sort_order = (
+        SELECT COUNT(*) FROM items b
+          WHERE b.project_id = items.project_id AND b.kind = 'task' AND b.status = items.status
+            AND (b.priority < items.priority OR (b.priority = items.priority AND b.id > items.id))
+      ) WHERE kind = 'task';
+    `);
+  }
 
   // One-time consolidation: merge legacy `recommendation` + `next_step` into a single
   // `suggestion` kind. Idempotent — after the first run there are no legacy-kind rows left,

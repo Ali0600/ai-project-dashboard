@@ -1,16 +1,17 @@
 "use client";
 
 import {
+  closestCorners,
   DndContext,
   DragOverlay,
   PointerSensor,
-  useDraggable,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useId, useState } from "react";
 import type { ItemStatus, ItemWithSource } from "@/lib/types";
@@ -22,6 +23,7 @@ const COLUMNS: { id: Exclude<ItemStatus, "dismissed">; title: string }[] = [
   { id: "in_progress", title: "In Progress" },
   { id: "done", title: "Done" },
 ];
+const COLUMN_IDS = COLUMNS.map((c) => String(c.id));
 
 function NewBadge() {
   return (
@@ -41,11 +43,12 @@ interface CardProps {
 }
 
 function TaskCard({ item, isNew, onConfirm, onDismissSuggestion, onPriorityChange, onOpenDetail }: CardProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: String(item.id),
   });
   const style = {
-    transform: CSS.Translate.toString(transform),
+    transform: CSS.Transform.toString(transform),
+    transition,
     opacity: isDragging ? 0.4 : 1,
   };
 
@@ -118,11 +121,13 @@ function Column({
   id,
   title,
   count,
+  itemIds,
   children,
 }: {
   id: string;
   title: string;
   count: number;
+  itemIds: string[];
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
@@ -141,7 +146,9 @@ function Column({
           {count}
         </span>
       </div>
-      <div className="flex flex-col gap-2">{children}</div>
+      <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+        <div className="flex min-h-4 flex-col gap-2">{children}</div>
+      </SortableContext>
     </div>
   );
 }
@@ -149,7 +156,7 @@ function Column({
 export default function KanbanBoard({
   tasks,
   recentlyAdded,
-  onMove,
+  onReorder,
   onConfirm,
   onDismissSuggestion,
   onPriorityChange,
@@ -157,7 +164,7 @@ export default function KanbanBoard({
 }: {
   tasks: ItemWithSource[];
   recentlyAdded: Set<number>;
-  onMove: (id: number, status: ItemStatus) => void;
+  onReorder: (status: ItemStatus, orderedIds: number[]) => void;
   onConfirm: (id: number) => void;
   onDismissSuggestion: (id: number) => void;
   onPriorityChange: (id: number, rank: number) => void;
@@ -171,14 +178,48 @@ export default function KanbanBoard({
   const visible = tasks.filter((i) => i.status !== "dismissed");
   const activeItem = activeId != null ? tasks.find((i) => i.id === activeId) : null;
 
+  // Cards in a column, ordered by manual sort_order (newest wins ties → new/unseeded cards on top).
+  const columnItems = (status: string) =>
+    visible
+      .filter((i) => i.status === status)
+      .sort((a, b) => a.sort_order - b.sort_order || b.id - a.id);
+
   function onDragStart(e: DragStartEvent) {
     setActiveId(Number(e.active.id));
   }
+
   function onDragEnd(e: DragEndEvent) {
     setActiveId(null);
     const { active, over } = e;
     if (!over) return;
-    onMove(Number(active.id), String(over.id) as ItemStatus);
+    const activeIdNum = Number(active.id);
+    const overId = String(over.id);
+    if (overId === String(activeIdNum)) return; // dropped on itself → no-op
+
+    const activeTask = tasks.find((i) => i.id === activeIdNum);
+    if (!activeTask) return;
+
+    // `over` is either a column droppable id or another card's id — resolve the target column.
+    const overTask = tasks.find((i) => String(i.id) === overId);
+    const targetStatus = (COLUMN_IDS.includes(overId) ? overId : overTask?.status) as
+      | ItemStatus
+      | undefined;
+    if (!targetStatus) return;
+
+    // Rebuild the target column's id order with the dragged card inserted at the drop position.
+    const targetIds = columnItems(targetStatus)
+      .map((i) => i.id)
+      .filter((id) => id !== activeIdNum);
+    const overIndex =
+      overTask && overTask.status === targetStatus ? targetIds.indexOf(overTask.id) : -1;
+    targetIds.splice(overIndex < 0 ? targetIds.length : overIndex, 0, activeIdNum);
+
+    // Skip the write when nothing actually changed (same column, same order).
+    if (activeTask.status === targetStatus) {
+      const before = columnItems(targetStatus).map((i) => i.id);
+      if (before.length === targetIds.length && before.every((id, i) => id === targetIds[i])) return;
+    }
+    onReorder(targetStatus, targetIds);
   }
 
   if (visible.length === 0) {
@@ -190,14 +231,24 @@ export default function KanbanBoard({
   }
 
   return (
-    <DndContext id={dndContextId} sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+    <DndContext
+      id={dndContextId}
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
       <div className="flex flex-col gap-3 md:flex-row">
         {COLUMNS.map((col) => {
-          const colItems = visible
-            .filter((i) => i.status === col.id)
-            .sort((a, b) => a.priority - b.priority || b.id - a.id);
+          const colItems = columnItems(col.id);
           return (
-            <Column key={col.id} id={col.id} title={col.title} count={colItems.length}>
+            <Column
+              key={col.id}
+              id={col.id}
+              title={col.title}
+              count={colItems.length}
+              itemIds={colItems.map((i) => String(i.id))}
+            >
               {colItems.map((item) => (
                 <TaskCard
                   key={item.id}
