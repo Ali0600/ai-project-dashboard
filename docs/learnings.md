@@ -387,3 +387,25 @@ the UI tabs — plus a migration to purge rows that already carry the retired va
   `Record<Kind,…>` / switches) point you at every call site; ship the removal *with* an idempotent
   migration that deletes/converts existing rows, and confirm the row distribution before→after. Pairs
   with "every kind-specific operation must filter by `kind`."
+
+## Seed a new ordering column from the existing implicit sort
+When you add a manual-order column (e.g. `sort_order`) to a table that already has rows, backfill it
+from whatever order the UI shows *today* so nothing visibly reshuffles on first load.
+- **Why it came up:** adding drag-to-reorder needed a `sort_order` column, but existing boards were
+  ordered by `(priority ASC, id DESC)`. The migration seeds each card's position with a correlated
+  `COUNT(*)` of same-column cards that sort before it under that old order — so day-one order is
+  identical, and manual drags take over from there. Guarded to run only when the column is first added
+  (so it never clobbers a user's saved order on later boots).
+- **Takeaway:** a data migration that introduces ordering must preserve the current apparent order;
+  compute the seed from the existing sort keys, and gate the one-time backfill on "column just added."
+
+## A library can ship two coexisting API generations — verify which one you have installed
+The same package name (or family) may have a current stable API and a newer rewrite with a totally
+different surface; fetched docs can describe either.
+- **Why it came up:** Context7 returned dnd-kit's newer `@dnd-kit/react` API (`DragDropProvider`,
+  `useSortable` from `@dnd-kit/react/sortable`, `move` from `@dnd-kit/helpers`) — but this project uses
+  the classic `@dnd-kit/core` + `@dnd-kit/sortable` (`DndContext`, `SortableContext`, `arrayMove`).
+  Coding against the returned snippet verbatim would not have compiled.
+- **Takeaway:** before writing against docs, cross-check the API against the *installed* version
+  (`package.json` + the package's own exports), not just the library name — a doc lookup answers "how
+  does this library work," not "how does the version I have work."
