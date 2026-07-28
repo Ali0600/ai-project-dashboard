@@ -67,7 +67,11 @@ export default function PreflightPanel({
       if (!res.ok) throw new Error(json.error || "scan failed");
       if (json.skipped) {
         setReport(null);
-        setError("No package.json / requirements.txt found in this project's folder.");
+        setError(
+          json.reason === "project folder not found"
+            ? `This project's folder is missing (${json.missingCwd}) — update it above to scan.`
+            : "No package.json / requirements.txt found in this project's folder.",
+        );
       } else if (json.report) {
         setReport(json.report as PreflightReport);
         setStale(Boolean(json.stale));

@@ -92,6 +92,13 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/**
+ * How recently a conversation must have been active for an already-missing transcript to mean "it
+ * was never written" rather than "it has since been pruned". Claude Code's retention is measured in
+ * weeks, so a few days is a wide safety margin on the destructive branch.
+ */
+const PHANTOM_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+
 /** Lightweight, idempotent column migrations for DBs created before a column existed. */
 function migrate(db: Database.Database): void {
   const cols = (db.prepare("PRAGMA table_info(items)").all() as { name: string }[]).map(
@@ -158,4 +165,68 @@ function migrate(db: Database.Database): void {
   db.exec(
     `UPDATE conversations SET title = COALESCE(NULLIF(slug, ''), session_id) WHERE title IS NULL OR title = '';`,
   );
+
+  reconcileMissingTranscripts(db);
+}
+
+/**
+ * Reconcile conversations whose transcript no longer exists on disk. Claude Code prunes transcripts
+ * on its own retention schedule, so a conversation flagged for scanning can lose its content before
+ * anyone scans it — silently, because a missing file is skipped everywhere.
+ *
+ * Two distinct cases, and conflating them is what hid this:
+ *  - Never scanned → `lost`. The content is unrecoverable; the UI surfaces the count.
+ *  - Never scanned AND flagged so recently that no retention window could have elapsed → the
+ *    transcript never existed at all (an orchestrated/ephemeral run whose real transcript lives
+ *    elsewhere). Delete it; there was never anything to lose.
+ * Conversations already scanned keep their status — their items are safely in the DB.
+ *
+ * The age test is the only reliable discriminator: the hook records the same NULL metadata for both
+ * kinds, so "recent + already missing" is what separates "never written" from "pruned since".
+ * Deleting is the destructive branch, so it stays deliberately narrow — anything ambiguous is kept
+ * and marked `lost`.
+ *
+ * Idempotent: rows already `lost` are re-checked cheaply and phantom rows are gone after the first
+ * pass. A `lost` row whose file reappears is restored to `needs_scan` so it can still be captured.
+ */
+function reconcileMissingTranscripts(db: Database.Database): void {
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.transcript_path, c.scan_status, c.last_scanned_at, c.last_activity_at,
+              (SELECT COUNT(*) FROM items i WHERE i.conversation_id = c.id) AS item_count
+         FROM conversations c
+        WHERE c.scan_status IN ('needs_scan','lost')`,
+    )
+    .all() as {
+    id: number;
+    transcript_path: string;
+    scan_status: string;
+    last_scanned_at: string | null;
+    last_activity_at: string | null;
+    item_count: number;
+  }[];
+  if (rows.length === 0) return;
+
+  const markLost = db.prepare("UPDATE conversations SET scan_status = 'lost' WHERE id = ?");
+  const unmarkLost = db.prepare("UPDATE conversations SET scan_status = 'needs_scan' WHERE id = ?");
+  const remove = db.prepare("DELETE FROM conversations WHERE id = ?");
+
+  db.transaction(() => {
+    for (const c of rows) {
+      const exists = fs.existsSync(c.transcript_path);
+      if (exists) {
+        // A previously-lost transcript is back (restored, or the path was wrong) — let it be scanned.
+        if (c.scan_status === "lost") unmarkLost.run(c.id);
+        continue;
+      }
+      if (c.last_scanned_at != null || c.item_count > 0) continue; // captured something already
+      // "Missing already, but flagged within the last few days" can only mean the transcript was
+      // never written — real transcripts survive far longer than this before being pruned.
+      const activityMs = c.last_activity_at ? Date.parse(c.last_activity_at) : NaN;
+      const phantom =
+        Number.isFinite(activityMs) && Date.now() - activityMs < PHANTOM_MAX_AGE_MS;
+      if (phantom) remove.run(c.id);
+      else if (c.scan_status !== "lost") markLost.run(c.id);
+    }
+  })();
 }

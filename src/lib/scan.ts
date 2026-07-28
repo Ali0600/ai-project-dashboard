@@ -5,6 +5,7 @@ import { ingestExtraction } from "./ingest";
 import { extractBacklog } from "./plans";
 import {
   getConversationBySession,
+  markConversationLost,
   markConversationScanned,
   openItemTitles,
   upsertConversation,
@@ -93,7 +94,11 @@ export async function scanTranscript(
   // a session that never persisted). Skip gracefully and clear it from "pending" so the
   // batch doesn't keep failing on a file that no longer exists.
   if (!fs.existsSync(transcriptPath)) {
-    if (existing) markConversationScanned(existing.id, existing.last_scanned_uuid ?? null);
+    // Never extracted and the file is gone → its content is unrecoverable. Record that as `lost`
+    // rather than `scanned`, so the loss is visible instead of looking like a captured, empty run.
+    if (existing) {
+      markConversationLost(existing.id);
+    }
     return {
       conversationId: existing?.id ?? 0,
       created: 0,

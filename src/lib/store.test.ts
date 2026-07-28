@@ -5,7 +5,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "./db";
 import {
   collapseDuplicateTasks,
+  countLostConversations,
   flagSuggestedDone,
+  markConversationLost,
   getOrCreateProject,
   hasUnscannedActivity,
   insertItem,
@@ -206,6 +208,34 @@ describe("collapseDuplicateTasks", () => {
     expect(byTitle("Add EXPO_TOKEN GitHub secret")?.status).toBe("done"); // canonical kept
     expect(byTitle("Add EXPO_TOKEN secret to GitHub")?.status).toBe("dismissed"); // reworded dup
     expect(byTitle("Deploy to Render with monitoring")?.status).toBe("todo"); // distinct, untouched
+  });
+});
+
+describe("markConversationLost distinguishes lost content from captured work", () => {
+  it("marks a never-scanned conversation lost, but leaves an already-scanned one alone", () => {
+    const p = getOrCreateProject("/tmp/store-test-lost");
+    const db = getDb();
+    const add = (session: string, scanned: boolean) =>
+      db
+        .prepare(
+          `INSERT INTO conversations (session_id, project_id, transcript_path, scan_status, last_scanned_at)
+           VALUES (?, ?, '/tmp/gone.jsonl', ?, ?)`,
+        )
+        .run(session, p.id, scanned ? "scanned" : "needs_scan", scanned ? "2026-07-01 00:00:00" : null)
+        .lastInsertRowid as number;
+
+    const never = add("lost-never", false);
+    const already = add("lost-already", true);
+
+    markConversationLost(never);
+    markConversationLost(already);
+
+    const statusOf = (id: number) =>
+      (db.prepare("SELECT scan_status FROM conversations WHERE id = ?").get(id) as { scan_status: string })
+        .scan_status;
+    expect(statusOf(never)).toBe("lost"); // content unrecoverable — say so
+    expect(statusOf(already)).toBe("scanned"); // items already extracted; nothing was lost
+    expect(countLostConversations(p.id)).toBe(1);
   });
 });
 

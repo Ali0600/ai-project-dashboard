@@ -1,10 +1,13 @@
+import fs from "node:fs";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import DeleteProjectButton from "@/components/DeleteProjectButton";
 import PreflightPanel from "@/components/PreflightPanel";
 import ProjectDashboard from "@/components/ProjectDashboard";
+import ProjectPathNotice from "@/components/ProjectPathNotice";
 import type { PreflightReport } from "@/lib/preflight";
 import {
+  countLostConversations,
   deriveResearchTopic,
   getPreflightReport,
   getProject,
@@ -27,6 +30,9 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const preflightInitial: PreflightReport | null = pfRow
     ? (JSON.parse(pfRow.report) as PreflightReport)
     : null;
+  const cwdMissing = !fs.existsSync(project.cwd);
+  // Sessions whose transcript was pruned before anything was ever extracted from them.
+  const lost = countLostConversations(project.id);
 
   return (
     <div>
@@ -40,6 +46,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             <p className="text-xs text-zinc-400">{project.cwd}</p>
             <p className="mt-1 text-sm text-zinc-500">
               {conversations.length} conversation{conversations.length === 1 ? "" : "s"}
+              {lost > 0 && (
+                <span
+                  className="ml-2 text-amber-700 dark:text-amber-400"
+                  title="Their transcripts were pruned by Claude Code before anything was extracted from them — that content can't be recovered. Scan sooner to avoid this."
+                >
+                  · {lost} never captured
+                </span>
+              )}
             </p>
           </div>
           <DeleteProjectButton
@@ -49,6 +63,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           />
         </div>
       </div>
+
+      {cwdMissing && <ProjectPathNotice projectId={project.id} cwd={project.cwd} />}
 
       <PreflightPanel
         projectId={project.id}

@@ -38,7 +38,12 @@ try {
   // Only flag sessions for folders the dashboard ALREADY tracks as a project. A folder becomes a
   // project explicitly — via `/sync-board` or `npm run backfill` — so random one-off sessions
   // (e.g. in /tmp) never auto-create projects. Once a project exists, the hook keeps it fresh.
-  if (transcriptPath && cwd && sessionId && !skip && getProjectByCwd(cwd)) {
+  // A real interactive session has written its transcript by the time SessionEnd fires. Sessions
+  // that report a path which doesn't exist are ephemeral/orchestrated runs (workflow subagents keep
+  // their transcripts elsewhere) — recording them creates rows that can never be scanned.
+  const transcriptExists = !!transcriptPath && fs.existsSync(transcriptPath);
+
+  if (transcriptPath && transcriptExists && cwd && sessionId && !skip && getProjectByCwd(cwd)) {
     const meta: TranscriptMeta = {
       sessionId,
       cwd,

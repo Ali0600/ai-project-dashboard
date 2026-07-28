@@ -91,7 +91,12 @@ export interface ConversationRow {
   slug: string | null;
   transcript_path: string;
   last_scanned_uuid: string | null;
-  scan_status: "needs_scan" | "scanned";
+  /**
+   * `lost` = the transcript is gone from disk and this conversation was never extracted, so its
+   * content is unrecoverable. Distinct from `scanned` so a silent data loss isn't mislabelled as
+   * captured work (Claude Code prunes transcripts on its own retention schedule).
+   */
+  scan_status: "needs_scan" | "scanned" | "lost";
   started_at: string | null;
   last_activity_at: string | null;
   last_scanned_at: string | null;

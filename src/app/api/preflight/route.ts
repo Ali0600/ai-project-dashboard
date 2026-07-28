@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { NextResponse } from "next/server";
 import {
   collectManifestGroups,
@@ -38,6 +39,17 @@ export async function GET(req: Request) {
   const cached = getPreflightReport(projectId);
   if (cached && !force && Date.now() - cached.fetched_at < TTL) {
     return NextResponse.json({ report: JSON.parse(cached.report), cached: true, fetched_at: cached.fetched_at });
+  }
+
+  // A missing folder and a folder without manifests are different problems: reporting "no
+  // package.json" for a project whose directory was moved or deleted sends you looking in the wrong
+  // place (and the real repo may well have one).
+  if (!fs.existsSync(project.cwd)) {
+    return NextResponse.json({
+      skipped: true,
+      reason: "project folder not found",
+      missingCwd: project.cwd,
+    });
   }
 
   const groups = collectManifestGroups(project.cwd);

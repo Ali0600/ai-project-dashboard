@@ -185,6 +185,14 @@ export function getProjectByCwd(cwd: string): ProjectRow | undefined {
   return getDb().prepare("SELECT * FROM projects WHERE cwd = ?").get(cwd) as ProjectRow | undefined;
 }
 
+/**
+ * Re-point a project at a moved folder. Capture matches `cwd` exactly, so without this a moved repo
+ * silently stops being captured and a fresh `/sync-board` would fork a duplicate project.
+ */
+export function updateProjectCwd(id: number, cwd: string): void {
+  getDb().prepare("UPDATE projects SET cwd = ? WHERE id = ?").run(cwd, id);
+}
+
 /** Delete a project and (via ON DELETE CASCADE) its conversations + items. */
 export function deleteProject(id: number): void {
   getDb().prepare("DELETE FROM projects WHERE id = ?").run(id);
@@ -284,6 +292,28 @@ export function markConversationScanned(
       readMtimeMs != null ? new Date(readMtimeMs).toISOString().replace("T", " ").slice(0, 19) : null,
       id,
     );
+}
+
+/**
+ * Mark a conversation whose transcript no longer exists as `lost` — but only if it was never
+ * scanned. A conversation we already extracted keeps its `scanned` status: its items are safe in
+ * the DB, so a pruned transcript costs nothing.
+ */
+export function markConversationLost(id: number): void {
+  getDb()
+    .prepare(
+      `UPDATE conversations SET scan_status = 'lost'
+         WHERE id = ? AND last_scanned_at IS NULL AND scan_status != 'scanned'`,
+    )
+    .run(id);
+}
+
+/** Conversations whose content was lost before it was ever captured (per project). */
+export function countLostConversations(projectId: number): number {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM conversations WHERE project_id = ? AND scan_status = 'lost'")
+    .get(projectId) as { n: number };
+  return row.n;
 }
 
 /* ---------------------------------- items -------------------------------- */
