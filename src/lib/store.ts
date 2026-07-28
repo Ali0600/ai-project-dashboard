@@ -161,6 +161,39 @@ export function listProjects(): ProjectSummary[] {
   }));
 }
 
+export interface AttentionItem {
+  id: number;
+  project_id: number;
+  project_name: string;
+  kind: ItemKind;
+  title: string;
+  priority: number;
+  status: ItemStatus;
+  suggested_done: 0 | 1;
+  updated_at: string;
+}
+
+/**
+ * The few things across ALL projects that are actually waiting on the user: tasks marked "looks
+ * done" that need a yes/no, and open urgent/high work. The overview otherwise only answers "which
+ * projects exist", so anything needing a decision is buried one click deep in each project.
+ * Pending confirmations sort first — they're a question already asked.
+ */
+export function listAttentionItems(limit = 10): AttentionItem[] {
+  return getDb()
+    .prepare(
+      `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.priority, i.status,
+              i.suggested_done, i.updated_at
+         FROM items i
+         JOIN projects p ON p.id = i.project_id
+        WHERE i.status IN ('todo','in_progress')
+          AND (i.suggested_done = 1 OR (i.kind = 'task' AND i.priority <= 2))
+        ORDER BY i.suggested_done DESC, i.priority ASC, i.updated_at DESC
+        LIMIT ?`,
+    )
+    .all(limit) as AttentionItem[];
+}
+
 /** True if the transcript has activity newer than our last scan (live "needs scan"). */
 export function hasUnscannedActivity(conv: ConversationRow): boolean {
   // A transcript that no longer exists on disk can't be scanned — never "pending".

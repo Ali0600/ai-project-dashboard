@@ -1,8 +1,51 @@
 import Link from "next/link";
 import DeleteProjectButton from "@/components/DeleteProjectButton";
-import { listProjects, type ProjectSummary } from "@/lib/store";
+import { listAttentionItems, listProjects, type AttentionItem, type ProjectSummary } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
+
+const PRIORITY_LABEL: Record<number, { label: string; className: string }> = {
+  1: { label: "urgent", className: "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300" },
+  2: { label: "high", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
+};
+
+/** Cross-project list of what's actually waiting on the user (see listAttentionItems). */
+function NeedsYou({ items }: { items: AttentionItem[] }) {
+  return (
+    <div className="mb-8">
+      <h2 className="mb-2 text-sm font-semibold text-zinc-600 dark:text-zinc-300">Needs you</h2>
+      <ul className="flex flex-col gap-1.5">
+        {items.map((i) => {
+          const pri = PRIORITY_LABEL[i.priority];
+          return (
+            <li key={i.id}>
+              <Link
+                href={`/projects/${i.project_id}`}
+                className="flex items-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm transition-colors hover:border-indigo-400 dark:border-white/10 dark:bg-zinc-900 dark:hover:border-indigo-500"
+              >
+                {i.suggested_done === 1 ? (
+                  <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    looks done?
+                  </span>
+                ) : (
+                  pri && (
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${pri.className}`}
+                    >
+                      {pri.label}
+                    </span>
+                  )
+                )}
+                <span className="min-w-0 flex-1 truncate">{i.title}</span>
+                <span className="shrink-0 text-xs text-zinc-400">{i.project_name}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 function ProjectCard({ p }: { p: ProjectSummary }) {
   return (
@@ -37,6 +80,7 @@ function ProjectCard({ p }: { p: ProjectSummary }) {
 
 export default function Home() {
   const projects = listProjects();
+  const attention = listAttentionItems();
   // Only surface folders that actually have captured items; folders that were flagged but never
   // produced anything (or were scanned empty) collapse into a disclosure so they don't clutter.
   const withItems = projects.filter((p) => p.total_items > 0);
@@ -51,6 +95,8 @@ export default function Home() {
           conversations.
         </p>
       </div>
+
+      {attention.length > 0 && <NeedsYou items={attention} />}
 
       {projects.length === 0 ? (
         <div className="rounded-xl border border-dashed border-black/15 p-10 text-center dark:border-white/15">

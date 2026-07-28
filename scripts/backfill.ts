@@ -8,6 +8,13 @@
  *
  * Uses headless Claude (claude -p) under the hood — requires the `claude` CLI.
  */
+import path from "node:path";
+import { loadEnvLocal } from "../src/lib/env";
+
+// tsx doesn't load .env.local the way Next does — without this, DASHBOARD_FORCE_SUBSCRIPTION_AUTH
+// is ignored here and an inherited stale ANTHROPIC_* token 401s every extraction.
+loadEnvLocal(path.resolve(__dirname, ".."));
+
 import { ClaudeUnavailableError } from "../src/lib/claude";
 import { scanTranscript } from "../src/lib/scan";
 import { listTranscripts } from "../src/lib/transcripts";

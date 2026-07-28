@@ -3,11 +3,52 @@
  * conversation as `needs_scan` in the dashboard DB. Deliberately cheap: it never
  * parses the transcript and never blocks Claude Code (always exits 0).
  */
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getProjectByCwd, upsertConversation } from "../src/lib/store";
 import type { TranscriptMeta } from "../src/lib/transcripts";
+
+const DASHBOARD_DIR = path.resolve(__dirname, "..");
+
+/**
+ * Is auto-scan enabled? Hooks are spawned by Claude Code with a bare environment — they do NOT
+ * inherit the dev server's `.env.local` — so read the flag from that file directly, falling back to
+ * a real env var for anyone who prefers to export it.
+ */
+function autoScanEnabled(): boolean {
+  const truthy = (v: string | undefined) =>
+    v != null && v !== "" && v !== "0" && v.toLowerCase() !== "false";
+  if (process.env.DASHBOARD_AUTO_SCAN != null) return truthy(process.env.DASHBOARD_AUTO_SCAN);
+  try {
+    const env = fs.readFileSync(path.join(DASHBOARD_DIR, ".env.local"), "utf8");
+    const m = env.match(/^\s*DASHBOARD_AUTO_SCAN\s*=\s*(.*)$/m);
+    return truthy(m?.[1]?.trim().replace(/^["']|["']$/g, ""));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kick off extraction for the session that just ended, without making Claude Code wait for it.
+ * Detached + unref'd so this hook still returns immediately; scan-one.ts holds a per-session lock,
+ * so a duplicate SessionEnd (or a manual scan already running) can't double-extract.
+ */
+function spawnScan(transcriptPath: string): void {
+  try {
+    const child = spawn("npx", ["tsx", path.join(DASHBOARD_DIR, "scripts", "scan-one.ts"), "--transcript", transcriptPath], {
+      cwd: DASHBOARD_DIR,
+      detached: true,
+      stdio: "ignore",
+      // Mark it as ours so the scan's own `claude -p` children don't get captured as conversations.
+      env: { ...process.env, DASHBOARD_EXTRACTION: "1" },
+    });
+    child.unref();
+  } catch {
+    /* auto-scan is best-effort; never block the session ending */
+  }
+}
 
 function readStdin(): string {
   try {
@@ -55,6 +96,11 @@ try {
       lastUuid: null,
     };
     upsertConversation(meta, "needs_scan");
+
+    // Opt-in: extract right away instead of waiting for someone to open the dashboard and click
+    // Scan. Without this the board only updates when the user remembers to, and transcripts get
+    // pruned on Claude Code's schedule — so unscanned sessions can expire before they're captured.
+    if (autoScanEnabled()) spawnScan(transcriptPath);
   }
 } catch {
   // Never block Claude Code on a dashboard error.
