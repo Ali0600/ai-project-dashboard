@@ -52,6 +52,29 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   `refetch()` (GET `projects/[id]/items`) — don't rely on `router.refresh()` alone.
 - **"needs scan" is computed live** via `hasUnscannedActivity` (transcript mtime vs
   `last_scanned_at`), not just the stored flag — the `SessionEnd` hook only fires at session end.
+  `last_scanned_at` is the transcript mtime observed **when the scan started reading**, not the
+  finish time — extraction takes minutes, and stamping the end would mark content appended during
+  the run as already-seen.
+- **Three scan states, and they mean different things**: `needs_scan` (scannable), `scanned`
+  (captured), `lost` (transcript pruned before anything was ever extracted — unrecoverable, counted
+  on the project page). Never collapse `lost` into `scanned`: that's what hid silent data loss.
+  `db.ts` `reconcileMissingTranscripts()` maintains this on boot and deletes phantom rows (flagged
+  so recently that the transcript can only never have existed). Anything ambiguous stays `lost` —
+  the delete branch is the destructive one.
+- **Auto-scan** (`DASHBOARD_AUTO_SCAN=1`, opt-in): `flag-hook` spawns `scripts/scan-one.ts`
+  detached so the hook returns instantly. `scan-one` holds a per-session lockfile (`wx` create, with
+  a stale-lock age escape) and logs to `data/auto-scan.log`. CLI scripts must call
+  `loadEnvLocal()` — only Next reads `.env.local`, so without it a spawned job silently loses
+  `DASHBOARD_FORCE_SUBSCRIPTION_AUTH` and 401s.
+- **API surface is localhost-only by contract**: `next dev/start` bind `127.0.0.1`, and `src/proxy.ts`
+  (Next 16 renamed `middleware` → `proxy`) rejects `/api/*` requests with a foreign `Origin` or a
+  non-localhost `Host`. Route handlers get no framework CSRF protection — Next's origin check covers
+  Server Actions only — and bodyless/`text/plain` POSTs are CORS-simple, so this guard is what stops
+  any open web page from triggering apply/scan/research.
+- **Bounded agents get write XOR network**: `applyPlanOnBranch` may edit (no Bash/web),
+  `implementPlan` may read the repo (no edits, no web), `researchFeatures` may use the web (no
+  `Read`, runs in a scratch cwd). Granting one agent both file reads and web egress is an
+  exfiltration channel — keep them exclusive when adding new flows.
 - **Additive DB columns**: guarded `PRAGMA table_info` + `ALTER` in `db.ts` `migrate()` (keep the
   SCHEMA default and the ALTER default identical).
 - The dashboard's own headless `claude -p` runs set `DASHBOARD_EXTRACTION=1` so `flag-hook` ignores
@@ -105,5 +128,7 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
 - `npm run dev` · `npm run build` · `npm run lint` · `npm test` (Vitest)
 - `npm run backfill [-- --project <name>] [--full]` · `npm run prioritize [-- --project <name>]`
 - `npm run install-hooks [-- --dry-run]`
+- `npx tsx scripts/scan-one.ts --transcript <path>` — scan ONE conversation unattended (what
+  `flag-hook` spawns when `DASHBOARD_AUTO_SCAN=1`).
 - Typecheck: `npx tsc --noEmit`
 - CI (`.github/workflows/ci.yml`) runs typecheck · lint · test · build on push/PR.

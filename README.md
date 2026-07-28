@@ -135,14 +135,20 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 | `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |
 | `DASHBOARD_FORCE_SUBSCRIPTION_AUTH` | `0` | Set `1` to strip inherited `ANTHROPIC_*` from spawned `claude` runs, forcing your persistent login (avoids 401s from an expired inherited token) |
+| `DASHBOARD_AUTO_SCAN` | `0` | Set `1` to extract automatically when a session ends, instead of waiting for you to click **Scan**. Recommended: transcripts are pruned on Claude Code's own schedule, so unscanned sessions can expire before they're ever captured. Runs detached (never blocks Claude Code), takes a per-session lock so it can't double-extract, and logs every run to `data/auto-scan.log` |
 | `PREFLIGHT_URL` | _(unset)_ | Base URL of a [Preflight](https://preflight-web.vercel.app) dependency-scanner (keyless `POST /api/scan`). When set, project cards show a CVE/malware badge. e.g. `https://preflight-web.vercel.app` or `http://localhost:3000` |
 
 ## Docker
 
 ```bash
 docker build -t ai-project-dashboard .
-docker run -p 3000:3000 -v "$PWD/data:/app/data" ai-project-dashboard
+docker run -p 127.0.0.1:3000:3000 -v "$PWD/data:/app/data" ai-project-dashboard
 ```
+
+> The published port is bound to `127.0.0.1` deliberately. This dashboard has no authentication and
+> its API can delete projects and start edit-enabled Claude runs against your local repos, so it
+> should never be reachable from the network. `npm run dev` / `npm start` bind `127.0.0.1` for the
+> same reason (Next's own default is `0.0.0.0`).
 
 > The container serves the UI and manual board use. Automatic capture (hooks) and headless
 > scanning need the host's `claude` CLI and `~/.claude` data, so run `backfill`/hooks on the host.

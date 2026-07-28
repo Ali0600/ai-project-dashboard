@@ -409,3 +409,59 @@ different surface; fetched docs can describe either.
 - **Takeaway:** before writing against docs, cross-check the API against the *installed* version
   (`package.json` + the package's own exports), not just the library name — a doc lookup answers "how
   does this library work," not "how does the version I have work."
+
+## A filtered view must not be the basis for a whole-collection write
+When a UI hides rows (search, facet, tab) but lets you reorder or renumber what's left, computing
+the new positions from the *visible* subset silently scrambles the hidden ones.
+- **Why it came up:** dragging a card in a search-filtered Kanban column wrote `sort_order = index
+  among visible cards`, so hidden cards kept old values and interleaved into the order the user had
+  just created. Nothing errored — the optimistic UI matched the (wrong) write. The fix passes the
+  full column plus a match predicate: render the filtered subset, compute the write from the whole.
+- **Takeaway:** filtering is a *view* concern. Any write expressed as "position within the list"
+  must be derived from the complete list, or the filter becomes a data-corruption vector.
+
+## Localhost isn't a security boundary unless you actually bind to it
+"It only runs on my machine" is an assumption about the *bind address* and the *browser*, and both
+default the unsafe way.
+- **Why it came up:** the dashboard's `next dev`/`next start` inherited Next's `0.0.0.0` default, so
+  an unauthenticated API that can delete projects and spawn edit-enabled agents was reachable from
+  any device on the Wi-Fi (verified with `lsof`: `*:PORT` without the flag, `127.0.0.1:PORT` with
+  it). Separately, a bodyless or `text/plain` POST is a CORS *simple request* — no preflight — so any
+  web page the user had open could hit those same routes; framework CSRF protection covered Server
+  Actions only, not route handlers.
+- **Takeaway:** for any local tool with real capability, bind `127.0.0.1` explicitly, reject requests
+  with a foreign `Origin` or non-localhost `Host` (the latter also stops DNS rebinding), and confirm
+  the listener with `lsof -iTCP -sTCP:LISTEN` rather than trusting the "Local:" line in the startup
+  banner.
+
+## Give an autonomous agent write access XOR network access, never both
+Tool grants compose into capabilities you didn't intend to hand out.
+- **Why it came up:** the research agent was granted `WebSearch WebFetch Read` with a comment saying
+  it "can only read the web, never act on it" — but `Read` + `WebFetch` is an exfiltration primitive:
+  a prompt-injected page can instruct it to read local files (this repo holds the SQLite DB and
+  `.env.local`) and POST them anywhere. The sibling apply-agent had already got this right by denying
+  network while allowing edits; the read-only planner had drifted the other way.
+- **Takeaway:** enumerate an agent's granted tools as a *pair* — what it can read/write locally, and
+  where it can send bytes. Keep those exclusive, and run web-facing agents from a scratch cwd so an
+  incidental read finds nothing.
+
+## Only the framework loads `.env.local` — spawned scripts start bare
+Config that "works in the app" can be silently absent in the CLI scripts and hooks beside it.
+- **Why it came up:** `DASHBOARD_FORCE_SUBSCRIPTION_AUTH` (which strips an inherited, expired token so
+  the `claude` CLI uses its own login) lives in `.env.local`. Next loads that automatically; `tsx`
+  does not — so the new hook-spawned scanner, and the existing backfill script, ran without it and
+  would 401 on every extraction. Added an explicit `loadEnvLocal()` the scripts call first.
+- **Takeaway:** anything spawned outside the framework (CLI script, hook, cron, launchd) must load
+  its configuration explicitly. Test the script the way production spawns it — a bare environment —
+  not from your shell, where the variable may be exported already.
+
+## Distinguish "we lost it" from "we processed it" in status enums
+Collapsing a failure state into a success state doesn't just lose information — it actively hides
+the failure, because everything downstream reads the success value as "handled."
+- **Why it came up:** when a transcript was pruned before being scanned, the code marked that
+  conversation `scanned` with zero items, and the liveness check dropped missing files from the
+  pending count. Both paths agreed nothing needed attention, so 36 conversations' worth of content
+  expired unnoticed. A distinct `lost` state (plus a count in the UI) made it visible.
+- **Takeaway:** when a pipeline can fail to acquire its input, that needs its own terminal state —
+  never the same one used for "successfully processed, nothing found." Audit the row distribution
+  (`GROUP BY status`) on real data to see which states your code actually produces.
