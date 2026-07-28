@@ -83,4 +83,23 @@ describe("extractBacklog", () => {
   it("returns null for an empty fence", () => {
     expect(extractBacklog("<!-- backlog:start -->\n\n<!-- backlog:end -->")).toBeNull();
   });
+
+  it("does not let a '#' comment inside a code block truncate the section", () => {
+    // Plans routinely embed shell snippets; "# setup" is a bash comment, not a heading.
+    const md = [
+      "## Backlog",
+      "- item one",
+      "```bash",
+      "# setup",
+      "npm ci",
+      "```",
+      "- item two",
+    ].join("\n");
+    expect(extractBacklog(md)).toContain("- item two");
+  });
+
+  it("does not start a section from a keyword heading inside a code block", () => {
+    const md = ["# Plan", "## Context", "```js", "# TODO: handle retries", "run()", "```"].join("\n");
+    expect(extractBacklog(md)).toBeNull();
+  });
 });

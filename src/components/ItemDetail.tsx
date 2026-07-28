@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatDate } from "@/lib/format";
 import type { ItemStatus, ItemWithSource } from "@/lib/types";
 import CopyButton from "./CopyButton";
@@ -45,12 +45,26 @@ export default function ItemDetail({
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyNote, setApplyNote] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // True only when the pointer press that produced a click STARTED on the backdrop. A click whose
+  // mousedown/mouseup land on different elements is dispatched at their common ancestor (the
+  // backdrop), so without this, drag-selecting text in the modal and releasing outside closes it.
+  const pressedBackdrop = useRef(false);
 
   useEffect(() => {
     if (!item) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Move focus into the dialog and lock background scroll while it's open; restore both on close.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      previouslyFocused?.focus?.();
+    };
   }, [item, onClose]);
 
   if (!item) return null;
@@ -98,12 +112,23 @@ export default function ItemDetail({
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={(e) => {
+        pressedBackdrop.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && pressedBackdrop.current) onClose();
+        pressedBackdrop.current = false;
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={item.title}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-black/10 bg-white p-5 shadow-xl dark:border-white/10 dark:bg-zinc-900"
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-black/10 bg-white p-5 shadow-xl outline-none dark:border-white/10 dark:bg-zinc-900"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -277,7 +302,9 @@ export default function ItemDetail({
 
         {/* Actions */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {item.kind === "suggestion" && (
+          {/* Research ideas are promotable too — the modal is exactly where you read the source
+              link and decide to act on it. */}
+          {(item.kind === "suggestion" || item.kind === "research") && (
             <button
               onClick={() => {
                 onPromote(item.id);

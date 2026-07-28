@@ -12,12 +12,18 @@ import type {
 } from "./types";
 import type { TranscriptMeta } from "./transcripts";
 
-/** Normalize a title into a stable de-dup key. */
+/**
+ * Normalize a title into a stable de-dup key. Titles with no ASCII alphanumerics at all (e.g. a
+ * fully non-Latin or emoji-only title) would collapse to "" and then collide with each other under
+ * UNIQUE(project_id, kind, norm_key) — silently discarding every one after the first. Fall back to
+ * the raw lowercased title so such items stay distinguishable.
+ */
 export function normalizeTitle(s: string): string {
-  return s
+  const key = s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  return key || s.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 // Generic words stripped before fuzzy title matching, so the meaningful nouns dominate.
@@ -39,12 +45,22 @@ export function tokenize(s: string): string[] {
  * reference ("basket feature") match a longer stored title ("Build in-app basket optimizer …").
  */
 export function titleMatchScore(ref: string, candidate: string): number {
+  return titleMatchDetail(ref, candidate).score;
+}
+
+/**
+ * As `titleMatchScore`, but also returns the shared-token count. Callers that act on a match need
+ * the count: a reference that reduces to ONE significant token scores a perfect 1.0 against any
+ * title containing it ("Fix build" → {fix} ⊆ "Fix EPIPE crash in claude spawn"), so a score alone
+ * can't distinguish real evidence from a single coincidental word.
+ */
+export function titleMatchDetail(ref: string, candidate: string): { score: number; shared: number } {
   const a = new Set(tokenize(ref));
   const b = new Set(tokenize(candidate));
-  if (a.size === 0 || b.size === 0) return 0;
+  if (a.size === 0 || b.size === 0) return { score: 0, shared: 0 };
   let inter = 0;
   for (const t of a) if (b.has(t)) inter++;
-  return inter / Math.min(a.size, b.size);
+  return { score: inter / Math.min(a.size, b.size), shared: inter };
 }
 
 /**
@@ -243,14 +259,31 @@ export function listConversations(projectId: number): ConversationRow[] {
     .all(projectId) as ConversationRow[];
 }
 
-export function markConversationScanned(id: number, lastUuid: string | null): void {
+/**
+ * Record a completed scan. `readMtimeMs` is the transcript's mtime as observed when the scan STARTED
+ * reading — pass it so `last_scanned_at` is a watermark for "content we have seen", not "when the
+ * run happened". Extraction takes minutes of subprocess waits, and stamping the finish time would
+ * mark anything appended during the run as already-scanned (hasUnscannedActivity compares mtime),
+ * hiding it forever. Falls back to now() when the mtime is unavailable.
+ */
+export function markConversationScanned(
+  id: number,
+  lastUuid: string | null,
+  readMtimeMs?: number,
+): void {
   getDb()
     .prepare(
       `UPDATE conversations
-         SET scan_status = 'scanned', last_scanned_uuid = ?, last_scanned_at = datetime('now')
+         SET scan_status = 'scanned',
+             last_scanned_uuid = ?,
+             last_scanned_at = COALESCE(?, datetime('now'))
        WHERE id = ?`,
     )
-    .run(lastUuid, id);
+    .run(
+      lastUuid,
+      readMtimeMs != null ? new Date(readMtimeMs).toISOString().replace("T", " ").slice(0, 19) : null,
+      id,
+    );
 }
 
 /* ---------------------------------- items -------------------------------- */
@@ -379,12 +412,15 @@ export function insertItem(a: InsertItemArgs): number | null {
 }
 
 /** True if a non-dismissed task with this norm_key already exists in the project. */
-export function taskExistsWithKey(projectId: number, normKey: string): boolean {
+export function taskExistsWithKey(projectId: number, normKey: string, excludeId?: number): boolean {
   return !!getDb()
     .prepare(
-      "SELECT 1 FROM items WHERE project_id = ? AND kind = 'task' AND norm_key = ? AND status != 'dismissed' LIMIT 1",
+      `SELECT 1 FROM items
+         WHERE project_id = ? AND kind = 'task' AND norm_key = ? AND status != 'dismissed'
+           AND id != ?
+         LIMIT 1`,
     )
-    .get(projectId, normKey);
+    .get(projectId, normKey, excludeId ?? -1);
 }
 
 /**
@@ -467,14 +503,17 @@ export function collapseDuplicateTasks(projectId: number): number {
  * already exists (or the rename would collide with a task tombstone), dismiss the suggestion
  * instead and report "merged".
  */
-export function promoteToTask(id: number): "promoted" | "merged" | "missing" {
+export function promoteToTask(id: number): "promoted" | "merged" | "missing" | "already_task" {
   const db = getDb();
   const row = db.prepare("SELECT * FROM items WHERE id = ?").get(id) as ItemRow | undefined;
   if (!row) return "missing";
+  // A task can't be promoted to a task — and without this guard the collision check below matches
+  // the row ITSELF, so promoting a task would tombstone it while reporting success.
+  if (row.kind === "task") return "already_task";
   const dismiss = () =>
     db.prepare("UPDATE items SET status = 'dismissed', updated_at = datetime('now') WHERE id = ?").run(id);
 
-  if (taskExistsWithKey(row.project_id, row.norm_key)) {
+  if (taskExistsWithKey(row.project_id, row.norm_key, id)) {
     dismiss();
     return "merged";
   }
@@ -483,34 +522,46 @@ export function promoteToTask(id: number): "promoted" | "merged" | "missing" {
       "UPDATE items SET kind = 'task', status = 'todo', updated_at = datetime('now') WHERE id = ?",
     ).run(id);
     return "promoted";
-  } catch {
-    // UNIQUE(project_id,'task',norm_key) collision with a dismissed task tombstone.
+  } catch (e) {
+    // Only a UNIQUE(project_id,'task',norm_key) collision with a task tombstone means "merged";
+    // anything else (a locked DB, a disk error) must surface rather than silently dismissing.
+    if (!String((e as { code?: string }).code ?? "").startsWith("SQLITE_CONSTRAINT")) throw e;
     dismiss();
     return "merged";
   }
 }
 
-export function updateItemStatus(id: number, status: ItemStatus): void {
-  getDb()
-    .prepare("UPDATE items SET status = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(status, id);
+/** @returns true when a row was actually updated (false = no such item). */
+export function updateItemStatus(id: number, status: ItemStatus): boolean {
+  return (
+    getDb()
+      .prepare("UPDATE items SET status = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(status, id).changes > 0
+  );
 }
 
-export function updateItemPriority(id: number, priority: Priority): void {
-  getDb()
-    .prepare("UPDATE items SET priority = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(PRIORITY_RANK[priority], id);
+/** @returns true when a row was actually updated (false = no such item). */
+export function updateItemPriority(id: number, priority: Priority): boolean {
+  return (
+    getDb()
+      .prepare("UPDATE items SET priority = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(PRIORITY_RANK[priority], id).changes > 0
+  );
 }
 
 /**
  * Persist a Kanban column's manual card order (drag-to-reorder). Writes each task's `sort_order` to
  * its position in `orderedIds` and sets its `status`, so a card dragged across columns lands and
  * orders in one write. Scoped to this project's `kind='task'` rows; unknown ids are no-ops.
+ *
+ * Dismissed rows are deliberately excluded: a drag is computed from a client snapshot, so without
+ * this a reorder posted just after a scan dismissed a duplicate would resurrect that tombstone.
  */
 export function reorderTasks(projectId: number, status: ItemStatus, orderedIds: number[]): void {
   const db = getDb();
   const stmt = db.prepare(
-    "UPDATE items SET status = ?, sort_order = ?, updated_at = datetime('now') WHERE id = ? AND project_id = ? AND kind = 'task'",
+    `UPDATE items SET status = ?, sort_order = ?, updated_at = datetime('now')
+       WHERE id = ? AND project_id = ? AND kind = 'task' AND status != 'dismissed'`,
   );
   db.transaction(() => {
     orderedIds.forEach((id, i) => stmt.run(status, i, id, projectId));
@@ -585,18 +636,23 @@ export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence
       .all(projectId) as ItemRow[];
     let best: ItemRow | undefined;
     let bestScore = 0;
+    let bestShared = 0;
     let secondScore = 0;
     for (const it of openItems) {
-      const s = titleMatchScore(idOrTitle, it.title);
+      const { score: s, shared } = titleMatchDetail(idOrTitle, it.title);
       if (s > bestScore) {
         secondScore = bestScore;
         bestScore = s;
+        bestShared = shared;
         best = it;
       } else if (s > secondScore) {
         secondScore = s;
       }
     }
-    if (best && bestScore >= 0.7 && bestScore - secondScore >= 0.2) row = best;
+    // Require ≥2 shared tokens (mirroring the dedup guard in findFuzzyDuplicate): a one-token
+    // reference scores a perfect 1.0 on a single coincidental word, which is not evidence that the
+    // task is done.
+    if (best && bestShared >= 2 && bestScore >= 0.7 && bestScore - secondScore >= 0.2) row = best;
   }
   if (!row || row.status === "done" || row.status === "dismissed") return false;
   db.prepare(
@@ -606,17 +662,21 @@ export function flagSuggestedDone(projectId: number, idOrTitle: string, evidence
 }
 
 /** Confirm a "looks done" suggestion -> move to done. */
-export function confirmDone(id: number): void {
-  getDb()
-    .prepare(
-      "UPDATE items SET status = 'done', suggested_done = 0, updated_at = datetime('now') WHERE id = ?",
-    )
-    .run(id);
+export function confirmDone(id: number): boolean {
+  return (
+    getDb()
+      .prepare(
+        "UPDATE items SET status = 'done', suggested_done = 0, updated_at = datetime('now') WHERE id = ?",
+      )
+      .run(id).changes > 0
+  );
 }
 
 /** Reject a "looks done" suggestion -> keep the task, clear the flag. */
-export function dismissSuggestion(id: number): void {
-  getDb()
-    .prepare("UPDATE items SET suggested_done = 0, updated_at = datetime('now') WHERE id = ?")
-    .run(id);
+export function dismissSuggestion(id: number): boolean {
+  return (
+    getDb()
+      .prepare("UPDATE items SET suggested_done = 0, updated_at = datetime('now') WHERE id = ?")
+      .run(id).changes > 0
+  );
 }

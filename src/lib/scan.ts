@@ -104,6 +104,15 @@ export async function scanTranscript(
     };
   }
 
+  // Watermark the transcript's mtime BEFORE reading: extraction below can run for minutes, and any
+  // content appended during that window must still count as unscanned (see markConversationScanned).
+  let readMtimeMs: number | undefined;
+  try {
+    readMtimeMs = fs.statSync(transcriptPath).mtimeMs;
+  } catch {
+    readMtimeMs = undefined;
+  }
+
   report({ phase: "reading" });
   const { meta, text, lastUuid, empty, planRefs } = await readTranscript(transcriptPath, since);
 
@@ -120,7 +129,7 @@ export async function scanTranscript(
 
   // Nothing new in the transcript and no plan backlog to (re)read → skip.
   if (empty && planChunks.length === 0) {
-    markConversationScanned(conv.id, lastUuid);
+    markConversationScanned(conv.id, lastUuid, readMtimeMs);
     return { conversationId: conv.id, created: 0, flaggedDone: 0, createdIds: [], chunks: 0, skipped: true };
   }
 
@@ -146,7 +155,7 @@ export async function scanTranscript(
     conversationId: conv.id,
     extraction: merged,
   });
-  markConversationScanned(conv.id, lastUuid);
+  markConversationScanned(conv.id, lastUuid, readMtimeMs);
 
   return { conversationId: conv.id, ...res, chunks: chunks.length, skipped: false };
 }

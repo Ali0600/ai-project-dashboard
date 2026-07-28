@@ -11,7 +11,9 @@ import {
   insertItem,
   listItems,
   normalizeTitle,
+  promoteToTask,
   reorderTasks,
+  updateItemStatus,
   titleJaccard,
   titleMatchScore,
   tokenize,
@@ -204,6 +206,64 @@ describe("collapseDuplicateTasks", () => {
     expect(byTitle("Add EXPO_TOKEN GitHub secret")?.status).toBe("done"); // canonical kept
     expect(byTitle("Add EXPO_TOKEN secret to GitHub")?.status).toBe("dismissed"); // reworded dup
     expect(byTitle("Deploy to Render with monitoring")?.status).toBe("todo"); // distinct, untouched
+  });
+});
+
+describe("flagSuggestedDone requires real evidence, not one coincidental word", () => {
+  it("does not flag a task when the reference shares only a single token", () => {
+    const p = getOrCreateProject("/tmp/store-test-1token");
+    insertItem({ projectId: p.id, kind: "task", title: "Fix EPIPE crash in claude spawn" });
+    // "build" is a stop word, so this reference reduces to the single token {fix} — a perfect
+    // containment score against the task above, but no evidence that the task is done.
+    expect(flagSuggestedDone(p.id, "Fix build", "ev")).toBe(false);
+    // Two shared significant tokens is real evidence and still flags.
+    expect(flagSuggestedDone(p.id, "the EPIPE crash", "ev")).toBe(true);
+  });
+});
+
+describe("promoteToTask never tombstones the task it was asked to promote", () => {
+  it("reports already_task instead of dismissing an existing task", () => {
+    const p = getOrCreateProject("/tmp/store-test-promote-task");
+    const taskId = insertItem({ projectId: p.id, kind: "task", title: "Ship the reorder API" })!;
+    // Before the guard, taskExistsWithKey matched the row itself → dismiss() + "merged".
+    expect(promoteToTask(taskId)).toBe("already_task");
+    expect(listItems(p.id, "task").find((i) => i.id === taskId)?.status).toBe("todo");
+  });
+
+  it("still promotes a suggestion and still merges a genuine collision", () => {
+    const p = getOrCreateProject("/tmp/store-test-promote-sugg");
+    const sug = insertItem({ projectId: p.id, kind: "suggestion", title: "Pin the GitHub repo" })!;
+    expect(promoteToTask(sug)).toBe("promoted");
+    expect(listItems(p.id, "task").find((i) => i.id === sug)?.kind).toBe("task");
+  });
+});
+
+describe("reorderTasks does not resurrect dismissed tasks", () => {
+  it("leaves a dismissed task dismissed when a stale drag lists it", () => {
+    const p = getOrCreateProject("/tmp/store-test-reorder-tombstone");
+    const keep = insertItem({ projectId: p.id, kind: "task", title: "Keep this open task" })!;
+    const gone = insertItem({ projectId: p.id, kind: "task", title: "Collapsed duplicate task" })!;
+    updateItemStatus(gone, "dismissed");
+
+    // A drag computed before the dismissal still lists `gone` in the column.
+    reorderTasks(p.id, "todo", [gone, keep]);
+
+    const rows = listItems(p.id, "task");
+    expect(rows.find((i) => i.id === gone)?.status).toBe("dismissed");
+    expect(rows.find((i) => i.id === keep)?.status).toBe("todo");
+  });
+});
+
+describe("normalizeTitle keeps non-Latin titles distinguishable", () => {
+  it("does not collapse titles without ASCII alphanumerics to the same key", () => {
+    // Both would normalize to "" before the fallback, colliding under UNIQUE(project,kind,norm_key)
+    // so the second insert would be silently dropped.
+    expect(normalizeTitle("支持离线模式")).not.toBe("");
+    expect(normalizeTitle("支持离线模式")).not.toBe(normalizeTitle("添加条形码扫描"));
+
+    const p = getOrCreateProject("/tmp/store-test-nonlatin");
+    expect(insertItem({ projectId: p.id, kind: "task", title: "支持离线模式" })).not.toBeNull();
+    expect(insertItem({ projectId: p.id, kind: "task", title: "添加条形码扫描" })).not.toBeNull();
   });
 });
 

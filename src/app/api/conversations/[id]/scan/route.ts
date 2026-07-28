@@ -24,7 +24,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder();
-      const send = (obj: unknown) => controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+      // If the client disconnects, enqueue throws — which would abort the scan mid-flight, BEFORE
+      // ingest and the checkpoint, discarding extraction work that was already paid for. Progress
+      // reporting is best-effort: once the stream is gone, keep scanning and just stop talking.
+      let closed = false;
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          closed = true;
+        }
+      };
       try {
         const result = await scanTranscript(conv.transcript_path, {
           incremental: !body.full,
@@ -34,10 +45,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       } catch (e) {
         // Errors travel in-stream (HTTP status is already 200 once streaming starts).
         const error = e instanceof ClaudeUnavailableError ? e.message : (e as Error).message;
+        // Also log server-side: if the stream is already gone, in-stream is nobody.
+        console.error(`[scan] conversation ${conv.id} failed:`, e);
         send({ phase: "error", error });
       } finally {
-        controller.close();
+        try {
+          if (!closed) controller.close();
+        } catch {
+          /* already closed by the client disconnecting */
+        }
       }
+    },
+    cancel() {
+      // Client went away; scanTranscript keeps running so its ingest + checkpoint still land.
     },
   });
 

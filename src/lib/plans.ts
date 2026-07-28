@@ -25,6 +25,9 @@ const HEADING = /^(#{1,6})\s+(.*\S)\s*$/;
 // A bold run at the START of a line; trailing content allowed (e.g. "**Env knobs:** FOO").
 // A list item like "- **Foo** bar" starts with "-", so it isn't matched (stays content).
 const BOLD_LABEL = /^\*\*\s*([^*]+?)\s*\*\*/;
+// A fenced code block delimiter. Plans routinely embed shell/code samples whose `# comment` lines
+// look exactly like markdown headings — parsing those would falsely start or truncate a section.
+const FENCE = /^\s*(```|~~~)/;
 
 /**
  * Extract a plan's Backlog section, or `null` when the plan has no recognizable one (the noise
@@ -47,7 +50,13 @@ export function extractBacklog(md: string): string | null {
   let start = -1;
   let startLevel = 0;
   let startIsHeading = false;
+  let inFence = false;
   for (let i = 0; i < lines.length; i++) {
+    if (FENCE.test(lines[i])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue; // a "# ..." inside a code sample is not a heading
     const h = lines[i].match(HEADING);
     if (h && SECTION_LABEL.test(h[2])) {
       start = i;
@@ -65,12 +74,20 @@ export function extractBacklog(md: string): string | null {
   if (start === -1) return null;
 
   const body: string[] = [];
+  inFence = false;
   for (let i = start + 1; i < lines.length; i++) {
-    const h = lines[i].match(HEADING);
-    if (h) {
-      if (!startIsHeading || h[1].length <= startLevel) break; // heading ends the section
-    } else if (!startIsHeading && BOLD_LABEL.test(lines[i])) {
-      break; // a bold-label section ends at the next bold label
+    if (FENCE.test(lines[i])) {
+      inFence = !inFence;
+      body.push(lines[i]);
+      continue;
+    }
+    if (!inFence) {
+      const h = lines[i].match(HEADING);
+      if (h) {
+        if (!startIsHeading || h[1].length <= startLevel) break; // heading ends the section
+      } else if (!startIsHeading && BOLD_LABEL.test(lines[i])) {
+        break; // a bold-label section ends at the next bold label
+      }
     }
     body.push(lines[i]);
   }

@@ -13,22 +13,32 @@ export default function PriorityPill({
   itemId,
   rank,
   onChanged,
+  onFailed,
 }: {
   itemId: number;
   rank: number;
   onChanged?: (rank: number) => void;
+  onFailed?: () => void;
 }) {
   const current = priorityFromRank(rank);
   const meta = PRIORITY_META[current];
 
   async function change(p: Priority) {
     if (p === current) return;
+    const previous = rank;
     onChanged?.(PRIORITY_RANK[p]); // optimistic
-    await fetch(`/api/items/${itemId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ priority: p }),
-    });
+    // A failed write must roll the pill back rather than showing a priority the DB doesn't have.
+    try {
+      const res = await fetch(`/api/items/${itemId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ priority: p }),
+      });
+      if (!res.ok) throw new Error("save failed");
+    } catch {
+      onChanged?.(previous);
+      onFailed?.();
+    }
   }
 
   return (

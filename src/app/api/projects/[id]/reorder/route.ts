@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getProject, reorderTasks } from "@/lib/store";
-import { ITEM_STATUSES, type ItemStatus } from "@/lib/types";
+import type { ItemStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
+
+/** Only real Kanban columns can receive a drag — 'dismissed' is not a drop target. */
+const COLUMN_STATUSES: ItemStatus[] = ["todo", "in_progress", "done"];
+/** Bound the write: a column is a handful of cards, never thousands. */
+const MAX_ORDERED_IDS = 500;
 
 /**
  * POST /api/projects/:id/reorder — persist a Kanban column's manual card order after a drag.
@@ -21,7 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const body = (await req.json().catch(() => ({}))) as { status?: string; orderedIds?: unknown };
   const status = body.status as ItemStatus;
-  if (!ITEM_STATUSES.includes(status)) {
+  if (!COLUMN_STATUSES.includes(status)) {
     return NextResponse.json({ error: "invalid status" }, { status: 400 });
   }
   if (
@@ -29,6 +34,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     !body.orderedIds.every((n) => Number.isFinite(Number(n)))
   ) {
     return NextResponse.json({ error: "orderedIds must be an array of numbers" }, { status: 400 });
+  }
+  if (body.orderedIds.length > MAX_ORDERED_IDS) {
+    return NextResponse.json(
+      { error: `orderedIds must contain at most ${MAX_ORDERED_IDS} ids` },
+      { status: 400 },
+    );
   }
 
   reorderTasks(projectId, status, body.orderedIds.map(Number));

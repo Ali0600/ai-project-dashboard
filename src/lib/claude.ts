@@ -120,6 +120,11 @@ function spawnClaude(args: string[], opts: { cwd?: string; input?: string } = {}
         resolve(out);
       }
     });
+    // Prompts run to ~120KB (CHUNK_CHARS), far past the OS pipe buffer, so part of the write stays
+    // queued in Node. If the CLI exits before draining it (auth failure, rejected flag), the flush
+    // fails with EPIPE — and an unhandled stream 'error' is an uncaughtException that would take
+    // down the whole server. Swallow it here; the 'close' handler already reports the real failure.
+    child.stdin.on("error", () => {});
     if (opts.input != null) child.stdin.write(opts.input);
     child.stdin.end();
   });

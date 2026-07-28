@@ -24,7 +24,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder();
-      const send = (obj: unknown) => controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+      // Best-effort progress: a client disconnect must not abort the run before its ingest lands
+      // (see the scan route — same guard, same reason).
+      let closed = false;
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          closed = true;
+        }
+      };
       try {
         send({ phase: "searching" });
         const ideas = await researchFeatures({ topic, existingTitles: openItemTitles(projectId) });
@@ -33,10 +43,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         send({ phase: "result", ...res });
       } catch (e) {
         const error = e instanceof ClaudeUnavailableError ? e.message : (e as Error).message;
+        console.error(`[research] project ${projectId} failed:`, e);
         send({ phase: "error", error });
       } finally {
-        controller.close();
+        try {
+          if (!closed) controller.close();
+        } catch {
+          /* already closed by the client disconnecting */
+        }
       }
+    },
+    cancel() {
+      // Client went away; the run continues so its ingest still lands.
     },
   });
 

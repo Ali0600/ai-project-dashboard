@@ -39,10 +39,19 @@ interface CardProps {
   onConfirm: (id: number) => void;
   onDismissSuggestion: (id: number) => void;
   onPriorityChange: (id: number, rank: number) => void;
+  onWriteFailed?: () => void;
   onOpenDetail: (id: number) => void;
 }
 
-function TaskCard({ item, isNew, onConfirm, onDismissSuggestion, onPriorityChange, onOpenDetail }: CardProps) {
+function TaskCard({
+  item,
+  isNew,
+  onConfirm,
+  onDismissSuggestion,
+  onPriorityChange,
+  onWriteFailed,
+  onOpenDetail,
+}: CardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: String(item.id),
   });
@@ -73,6 +82,7 @@ function TaskCard({ item, isNew, onConfirm, onDismissSuggestion, onPriorityChang
             itemId={item.id}
             rank={item.priority}
             onChanged={(r) => onPriorityChange(item.id, r)}
+            onFailed={onWriteFailed}
           />
         </div>
       </div>
@@ -155,19 +165,26 @@ function Column({
 
 export default function KanbanBoard({
   tasks,
+  matchesQuery,
   recentlyAdded,
   onReorder,
   onConfirm,
   onDismissSuggestion,
   onPriorityChange,
+  onWriteFailed,
   onOpenDetail,
 }: {
+  /** ALL tasks (unfiltered) — filtering is applied for rendering only, see `matchesQuery`. */
   tasks: ItemWithSource[];
+  /** Search predicate. Cards that don't match are hidden but keep their place in the real order. */
+  matchesQuery: (item: ItemWithSource) => boolean;
   recentlyAdded: Set<number>;
   onReorder: (status: ItemStatus, orderedIds: number[]) => void;
   onConfirm: (id: number) => void;
   onDismissSuggestion: (id: number) => void;
   onPriorityChange: (id: number, rank: number) => void;
+  /** Called when a card-level write (priority) failed, so the page can tell the user. */
+  onWriteFailed?: () => void;
   onOpenDetail: (id: number) => void;
 }) {
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -178,11 +195,16 @@ export default function KanbanBoard({
   const visible = tasks.filter((i) => i.status !== "dismissed");
   const activeItem = activeId != null ? tasks.find((i) => i.id === activeId) : null;
 
-  // Cards in a column, ordered by manual sort_order (newest wins ties → new/unseeded cards on top).
+  // FULL column order (search-independent), ordered by manual sort_order — newest wins ties so
+  // new/unseeded cards sit on top. Reorder writes are always computed against this, never against
+  // the filtered view: sort_order is a property of the whole column, so persisting positions from a
+  // filtered subset would interleave the hidden cards into the order the user just made.
   const columnItems = (status: string) =>
     visible
       .filter((i) => i.status === status)
       .sort((a, b) => a.sort_order - b.sort_order || b.id - a.id);
+  /** What the user actually sees in a column (full order, minus non-matching cards). */
+  const renderedItems = (status: string) => columnItems(status).filter(matchesQuery);
 
   function onDragStart(e: DragStartEvent) {
     setActiveId(Number(e.active.id));
@@ -206,17 +228,17 @@ export default function KanbanBoard({
       | undefined;
     if (!targetStatus) return;
 
-    // Rebuild the target column's id order with the dragged card inserted at the drop position.
-    const targetIds = columnItems(targetStatus)
-      .map((i) => i.id)
-      .filter((id) => id !== activeIdNum);
+    // Rebuild the target column's FULL id order with the dragged card inserted at the drop
+    // position. Using the full order (not the rendered/filtered one) keeps hidden cards in place —
+    // the dragged card lands exactly where it was dropped relative to the card it was dropped on.
+    const before = columnItems(targetStatus).map((i) => i.id);
+    const targetIds = before.filter((id) => id !== activeIdNum);
     const overIndex =
       overTask && overTask.status === targetStatus ? targetIds.indexOf(overTask.id) : -1;
     targetIds.splice(overIndex < 0 ? targetIds.length : overIndex, 0, activeIdNum);
 
     // Skip the write when nothing actually changed (same column, same order).
     if (activeTask.status === targetStatus) {
-      const before = columnItems(targetStatus).map((i) => i.id);
       if (before.length === targetIds.length && before.every((id, i) => id === targetIds[i])) return;
     }
     onReorder(targetStatus, targetIds);
@@ -226,6 +248,15 @@ export default function KanbanBoard({
     return (
       <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/15">
         No tasks yet. Scan a conversation or run <code>/sync-board</code> to populate the board.
+      </p>
+    );
+  }
+  // The board HAS tasks but the active search hides them all — don't claim the project is empty
+  // (and don't tell the user to scan; scanning wouldn't change anything).
+  if (!visible.some(matchesQuery)) {
+    return (
+      <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/15">
+        No tasks match your search. Clear the filter to see all {visible.length} tasks.
       </p>
     );
   }
@@ -240,7 +271,9 @@ export default function KanbanBoard({
     >
       <div className="flex flex-col gap-3 md:flex-row">
         {COLUMNS.map((col) => {
-          const colItems = columnItems(col.id);
+          // Render (and register as sortable) only the cards the search actually shows; the
+          // persisted order is still computed from the full column in onDragEnd.
+          const colItems = renderedItems(col.id);
           return (
             <Column
               key={col.id}
@@ -257,6 +290,7 @@ export default function KanbanBoard({
                   onConfirm={onConfirm}
                   onDismissSuggestion={onDismissSuggestion}
                   onPriorityChange={onPriorityChange}
+                  onWriteFailed={onWriteFailed}
                   onOpenDetail={onOpenDetail}
                 />
               ))}

@@ -7,6 +7,7 @@ import SourceLine from "./SourceLine";
 export default function ItemList({
   items,
   emptyLabel,
+  filtered = false,
   recentlyAdded,
   onSetStatus,
   onOpenDetail,
@@ -14,6 +15,8 @@ export default function ItemList({
 }: {
   items: ItemWithSource[];
   emptyLabel: string;
+  /** True when a search query is narrowing `items` — changes the empty state's wording. */
+  filtered?: boolean;
   recentlyAdded: Set<number>;
   onSetStatus: (id: number, status: ItemStatus) => void;
   onOpenDetail: (id: number) => void;
@@ -24,7 +27,9 @@ export default function ItemList({
   if (visible.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-black/15 p-8 text-center text-sm text-zinc-500 dark:border-white/15">
-        {emptyLabel}
+        {/* "nothing here yet" and "your search hid everything" are different states — saying the
+            former while a filter is active is simply wrong. */}
+        {filtered ? "Nothing matches your search. Clear the filter to see all items." : emptyLabel}
       </p>
     );
   }

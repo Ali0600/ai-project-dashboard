@@ -72,12 +72,18 @@ async function streamNdjson(res: Response, onEvent: (ev: Record<string, unknown>
   }
 }
 
-async function patch(id: number, body: Record<string, unknown>) {
-  await fetch(`/api/items/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+/** PATCH an item; resolves false when the write did not land (network error OR error status). */
+async function patch(id: number, body: Record<string, unknown>): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/items/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 export default function ProjectDashboard({
@@ -117,13 +123,22 @@ export default function ProjectDashboard({
   }, [scan]);
 
   /* --- mutations: optimistic local update + persist --- */
+  // A failed write must never leave the optimistic UI diverged from the DB: resync from the server
+  // and say so, rather than silently showing a change that didn't persist.
+  async function onWriteFailed(what: string) {
+    await refetch();
+    setSummary(`Couldn't save ${what} — reloaded from the server.`);
+  }
   function update(id: number, local: Partial<ItemWithSource>, body: Record<string, unknown>) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...local } : i)));
-    patch(id, body);
+    void patch(id, body).then((ok) => {
+      if (!ok) void onWriteFailed("that change");
+    });
   }
   const setStatus = (id: number, status: ItemStatus) => update(id, { status }, { status });
   // Drag-to-reorder within/across Kanban columns: apply the target column's new order
-  // optimistically (status + sort_order), then persist. On failure, refetch to resync.
+  // optimistically (status + sort_order), then persist. `fetch` only rejects on network failure, so
+  // check res.ok too — an error status must resync just like a dropped connection.
   const reorder = (status: ItemStatus, orderedIds: number[]) => {
     const pos = new Map(orderedIds.map((id, i) => [id, i] as const));
     setItems((prev) =>
@@ -133,9 +148,12 @@ export default function ProjectDashboard({
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status, orderedIds }),
-    }).catch(() => {
-      void refetch();
-    });
+    }).then(
+      (res) => {
+        if (!res.ok) void onWriteFailed("the new card order");
+      },
+      () => void onWriteFailed("the new card order"),
+    );
   };
   const confirmDone = (id: number) =>
     update(id, { status: "done", suggested_done: 0 }, { suggestion: "confirm" });
@@ -526,12 +544,14 @@ export default function ProjectDashboard({
             </div>
           )}
           <KanbanBoard
-            tasks={items.filter((i) => i.kind === "task" && matchesQuery(i))}
+            tasks={items.filter((i) => i.kind === "task")}
+            matchesQuery={matchesQuery}
             recentlyAdded={recentlyAdded}
             onReorder={reorder}
             onConfirm={confirmDone}
             onDismissSuggestion={dismissSuggestion}
             onPriorityChange={setPriority}
+            onWriteFailed={() => void onWriteFailed("the new priority")}
             onOpenDetail={setSelectedId}
           />
         </div>
@@ -539,6 +559,7 @@ export default function ProjectDashboard({
         <ItemList
           items={items.filter((i) => i.kind === active && matchesQuery(i))}
           emptyLabel={TABS.find((t) => t.key === active)!.empty}
+          filtered={query.trim() !== "" && items.some((i) => i.kind === active)}
           recentlyAdded={recentlyAdded}
           onSetStatus={setStatus}
           onOpenDetail={setSelectedId}

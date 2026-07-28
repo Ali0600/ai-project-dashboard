@@ -32,20 +32,30 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     suggestion?: "confirm" | "dismiss";
   };
 
+  // Each branch reports whether a row actually changed, so a write against a missing item (e.g.
+  // deleted by a project cascade in another tab) 404s instead of reporting a phantom success.
+  let changed: boolean;
   if (body.suggestion === "confirm") {
-    confirmDone(itemId);
+    changed = confirmDone(itemId);
   } else if (body.suggestion === "dismiss") {
-    dismissSuggestion(itemId);
+    changed = dismissSuggestion(itemId);
   } else if (body.promote === true) {
     const result = promoteToTask(itemId);
+    if (result === "missing") {
+      return NextResponse.json({ error: "item not found" }, { status: 404 });
+    }
+    if (result === "already_task") {
+      return NextResponse.json({ error: "item is already a task" }, { status: 400 });
+    }
     return NextResponse.json({ ok: true, result });
   } else if (body.priority && (PRIORITIES as readonly string[]).includes(body.priority)) {
-    updateItemPriority(itemId, body.priority as Priority);
+    changed = updateItemPriority(itemId, body.priority as Priority);
   } else if (body.status && (ITEM_STATUSES as readonly string[]).includes(body.status)) {
-    updateItemStatus(itemId, body.status as ItemStatus);
+    changed = updateItemStatus(itemId, body.status as ItemStatus);
   } else {
     return NextResponse.json({ error: "no valid action provided" }, { status: 400 });
   }
 
+  if (!changed) return NextResponse.json({ error: "item not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
