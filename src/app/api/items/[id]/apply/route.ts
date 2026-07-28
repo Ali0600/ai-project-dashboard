@@ -18,6 +18,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const ctx = getItemContext(itemId);
   if (!ctx) return NextResponse.json({ error: "item not found" }, { status: 404 });
+  // Tasks only. Suggestion/research text is model- and web-authored; promoting it to a task is the
+  // human checkpoint before it can steer an edit-enabled agent, and the UI's task-only gate is
+  // client-side, so enforce it here too.
+  if (ctx.item.kind !== "task") {
+    return NextResponse.json(
+      { error: "only tasks can be applied — promote this item to a task first" },
+      { status: 400 },
+    );
+  }
 
   try {
     const res = await applyPlanOnBranch({

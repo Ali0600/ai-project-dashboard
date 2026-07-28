@@ -18,6 +18,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const ctx = getItemContext(itemId);
   if (!ctx) return NextResponse.json({ error: "item not found" }, { status: 404 });
+  // Tasks only — same contract as Apply (the UI gate is client-side).
+  if (ctx.item.kind !== "task") {
+    return NextResponse.json(
+      { error: "only tasks can be implemented — promote this item to a task first" },
+      { status: 400 },
+    );
+  }
 
   try {
     const plan = await implementPlan({

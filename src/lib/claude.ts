@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ExtractionResult, PRIORITIES, type Priority, ResearchResult, type ResearchIdea } from "./types";
@@ -251,9 +252,11 @@ DETAILS: ${opts.detail || "(none)"}`;
     IMPLEMENT_MODEL,
     "--max-budget-usd",
     IMPLEMENT_BUDGET,
-    // Read-only: no file edits, no shell — guarantees "plan only, applies nothing".
+    // Read-only: no file edits, no shell. Web tools are denied too — planning works from the repo
+    // and the resumed conversation, and a task's text comes from transcripts (which can quote web
+    // content), so leaving egress open would pair "reads the whole repo" with "can post anywhere".
     "--disallowed-tools",
-    "Write Edit NotebookEdit Bash",
+    "Write Edit NotebookEdit Bash WebFetch WebSearch",
   ];
   if (opts.sessionId) args.push("--resume", opts.sessionId);
   else args.push("--no-session-persistence");
@@ -429,30 +432,41 @@ Return the JSON object now.`;
     RESEARCH_MODEL,
     "--max-budget-usd",
     RESEARCH_BUDGET,
-    // Web access ON; edits/shell OFF so the agent can only read the web, never act on it.
+    // Web access ON; local filesystem and shell OFF. `Read` is deliberately NOT granted: pairing it
+    // with WebFetch would be an exfiltration primitive — a prompt-injected page could tell the agent
+    // to read local files (this repo holds the dashboard DB and .env.local) and POST them out. The
+    // topic and existing titles are already in the prompt, so research needs nothing from disk.
     "--allowed-tools",
-    "WebSearch WebFetch Read",
+    "WebSearch WebFetch",
     "--disallowed-tools",
-    "Write Edit NotebookEdit Bash",
+    "Read Write Edit NotebookEdit Bash",
     "--no-session-persistence",
   ];
 
+  // Run from an empty scratch directory rather than the dashboard repo: defence in depth behind the
+  // denied Read tool, so even an incidental file access finds nothing (the repo cwd would otherwise
+  // expose data/dashboard.db and .env.local to the one agent that talks to the open web).
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "dash-research-"));
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const prompt =
-      attempt === 0
-        ? base
-        : `${base}\n\nYour previous response was not valid JSON. Return ONLY a single line of valid, minified JSON with all quotes escaped and no newlines inside strings.`;
-    const envelope = JSON.parse(await spawnClaude(args, { input: prompt }));
-    if (envelope.is_error || envelope.subtype !== "success") {
-      lastErr = new Error(`Claude research failed: ${envelope.subtype || "unknown error"}`);
-      continue;
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const prompt =
+        attempt === 0
+          ? base
+          : `${base}\n\nYour previous response was not valid JSON. Return ONLY a single line of valid, minified JSON with all quotes escaped and no newlines inside strings.`;
+      const envelope = JSON.parse(await spawnClaude(args, { cwd: scratch, input: prompt }));
+      if (envelope.is_error || envelope.subtype !== "success") {
+        lastErr = new Error(`Claude research failed: ${envelope.subtype || "unknown error"}`);
+        continue;
+      }
+      try {
+        return ResearchResult.parse(extractJsonObject(String(envelope.result ?? ""))).ideas;
+      } catch (e) {
+        lastErr = e;
+      }
     }
-    try {
-      return ResearchResult.parse(extractJsonObject(String(envelope.result ?? ""))).ideas;
-    } catch (e) {
-      lastErr = e;
-    }
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
   throw lastErr instanceof Error ? lastErr : new Error("research failed");
 }
