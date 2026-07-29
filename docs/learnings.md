@@ -465,3 +465,42 @@ the failure, because everything downstream reads the success value as "handled."
 - **Takeaway:** when a pipeline can fail to acquire its input, that needs its own terminal state —
   never the same one used for "successfully processed, nothing found." Audit the row distribution
   (`GROUP BY status`) on real data to see which states your code actually produces.
+
+## A global "don't duplicate" rule silently kills the one signal that needs duplicates
+When a pipeline is told to suppress repeats, adding a category whose *value is* the repeat count
+produces a feature that reports zero forever — and looks like good news.
+- **Why it came up:** the extractor is handed every open item under "do NOT duplicate anything
+  already in EXISTING OPEN ITEMS". Adding a `failure` kind whose whole point is recurrence meant
+  that the moment a failure existed as a row, the model was instructed never to report it again.
+  Nothing would error; the counter would just stay at 1, indistinguishable from "it stopped
+  happening". Fixed by scoping that list to task+suggestion and giving failures their own block
+  with the opposite instruction (re-report by exact title).
+- **Takeaway:** when you add a category to a pipeline that has global rules, re-read every rule
+  *as it applies to the new category*. A rule that is right for every existing case can be exactly
+  backwards for the new one, and the failure mode is silence.
+
+## Pick the similarity metric from the data's structure, not the metric you already have
+Reusing a generic text-similarity function on a field with embedded identifiers gets you both
+error modes at once — and the merge direction is the dangerous one.
+- **Why it came up:** the board dedups reworded items by token Jaccard. Applied to error titles it
+  scored `HTTP 500` vs `HTTP 502` at **0.667 → merged** (two distinct failures collapsing into one
+  counter) and the *same* failure paraphrased by the model at **0.455 → split** (one failure across
+  two rows, each stuck at 1). Both measured with the real helper before writing a line of the fix.
+  The fix was to extract the identifying marks first — status codes, error codes, hosts — and let a
+  signature mismatch veto the match outright.
+- **Takeaway:** before reusing a fuzzy matcher on a new field, run it over the pairs that *must*
+  match and the pairs that *must not*, and read the actual numbers. Fields with embedded
+  identifiers (codes, versions, hosts, ids) need those compared exactly; prose similarity is only
+  the tie-breaker.
+
+## Verify an agent's tool contract by capturing a real spawn, not by reading the args
+Security properties of a subprocess (what it may touch, where it runs, what's in its prompt) are
+assertable end-to-end even when you can't run the real binary.
+- **Why it came up:** the fix-research agent must run with `Read` denied, from a scratch cwd, with
+  no `--resume` and no filesystem path in its prompt — but the CLI wasn't authenticated locally, so
+  no live run was possible. Putting a stub `claude` on `PATH` that dumps its argv, cwd and stdin
+  turned all four into ordinary assertions, and proved the injection guard was actually present in
+  the prompt rather than merely written in the source.
+- **Takeaway:** a fake executable on `PATH` is the cheapest way to test what you *spawn*. It
+  verifies the real construction path (not a re-implementation of it) and works without
+  credentials, network, or the cost of a live call.
