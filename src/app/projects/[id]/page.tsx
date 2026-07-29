@@ -6,6 +6,7 @@ import PreflightPanel from "@/components/PreflightPanel";
 import ProjectDashboard from "@/components/ProjectDashboard";
 import ProjectPathNotice from "@/components/ProjectPathNotice";
 import type { PreflightReport } from "@/lib/preflight";
+import { ITEM_KINDS, type ItemKind } from "@/lib/types";
 import {
   countLostConversations,
   deriveResearchTopic,
@@ -18,10 +19,21 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const { id } = await params;
+  const { tab } = await searchParams;
   const project = getProject(Number(id));
   if (!project) notFound();
+  // ?tab= lets the overview's "Needs you" list deep-link to the tab the item actually lives on.
+  const initialTab = (ITEM_KINDS as readonly string[]).includes(tab ?? "")
+    ? (tab as ItemKind)
+    : "task";
 
   const items = listItemsWithSource(project.id);
   const conversations = listConversations(project.id);
@@ -78,6 +90,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         conversationIds={conversations.map((c) => c.id)}
         pendingConversationIds={pendingIds}
         derivedTopic={deriveResearchTopic(project.id)}
+        initialTab={initialTab}
       />
     </div>
   );

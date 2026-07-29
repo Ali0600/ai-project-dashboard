@@ -2,11 +2,11 @@
 
 # AI Project Dashboard
 
-Visualizes Claude Code conversations as per-project Kanban boards + **Suggestions** and
-**Research** tabs. Item kinds are `task` / `suggestion` / `research` (the old `recommendation` +
-`next_step` were merged into `suggestion`; the `learning` kind was removed — learnings live in
-`docs/learnings.md` / `~/.claude/lessons.md`, not the board; `research` comes from the web-research
-flow, not transcripts). Extraction is done by Claude itself (no API key) via the `/sync-board`
+Visualizes Claude Code conversations as per-project Kanban boards + **Suggestions**, **Research**
+and **Failures** tabs. Item kinds are `task` / `suggestion` / `research` / `failure` (the old
+`recommendation` + `next_step` were merged into `suggestion`; the `learning` kind was removed —
+learnings live in `docs/learnings.md` / `~/.claude/lessons.md`, not the board; `research` comes from
+the web-research flow, not transcripts). Extraction is done by Claude itself (no API key) via the `/sync-board`
 slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README.md` and
 `docs/learnings.md`.
 
@@ -72,9 +72,26 @@ slash command (live) or headless `claude -p` (backfill + UI "Scan"). See `README
   Server Actions only — and bodyless/`text/plain` POSTs are CORS-simple, so this guard is what stops
   any open web page from triggering apply/scan/research.
 - **Bounded agents get write XOR network**: `applyPlanOnBranch` may edit (no Bash/web),
-  `implementPlan` may read the repo (no edits, no web), `researchFeatures` may use the web (no
-  `Read`, runs in a scratch cwd). Granting one agent both file reads and web egress is an
-  exfiltration channel — keep them exclusive when adding new flows.
+  `implementPlan` may read the repo (no edits, no web), `researchFeatures` and `researchFix` may use
+  the web (no `Read`, run in a scratch cwd). Granting one agent both file reads and web egress is an
+  exfiltration channel — keep them exclusive when adding new flows. Corollary: never read files
+  server-side to splice into a web-facing agent's prompt, and never copy its output into a task's
+  `detail` (that field feeds the edit-enabled apply agent).
+- **Failures are the one kind that WANTS duplicates.** Recurrence is the signal, so:
+  `openItemTitles` (the prompt's "do not duplicate" list) is scoped to task+suggestion, and open
+  failures go in a separate `KNOWN FAILURES` block whose rule is the opposite — re-report them by
+  their exact title when they happen again. Ingest turns a refused duplicate into a
+  `recordFailureOccurrence` bump rather than dropping it. Break either half and recurrence dies
+  silently, looking exactly like "the failure stopped happening".
+- **Failure dedup uses `sameFailure`, not Jaccard.** Token overlap is wrong for error signatures in
+  both directions (measured: `HTTP 500` vs `HTTP 502` scores 0.667 → wrongly merged; the same
+  failure reworded scores 0.455 → wrongly split). `failureSignature` extracts status codes, error
+  codes and hosts; differing signatures veto a match, matching ones need only one shared word.
+- **`recordFailureOccurrence` is status-aware**: open → bump; `done` → bump **and reopen** (a fix
+  that didn't hold is the point); `dismissed` → no-op (a tombstone stays dead). `insertItem` stays
+  pure — it must keep returning `null` for duplicates, since `POST /api/items` maps that to 409.
+- **Failures spawn a fix task, they don't convert** (`createFixTaskFromFailure`): converting would
+  drop the row out of `openFailureTitles`, so the next recurrence would start a fresh row at 1.
 - **Additive DB columns**: guarded `PRAGMA table_info` + `ALTER` in `db.ts` `migrate()` (keep the
   SCHEMA default and the ALTER default identical).
 - The dashboard's own headless `claude -p` runs set `DASHBOARD_EXTRACTION=1` so `flag-hook` ignores

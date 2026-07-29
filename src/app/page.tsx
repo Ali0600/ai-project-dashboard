@@ -20,12 +20,19 @@ function NeedsYou({ items }: { items: AttentionItem[] }) {
           return (
             <li key={i.id}>
               <Link
-                href={`/projects/${i.project_id}`}
+                // Deep-link to the right tab: a failure is invisible on the default Board tab.
+                href={`/projects/${i.project_id}?tab=${i.kind}`}
                 className="flex items-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm transition-colors hover:border-indigo-400 dark:border-white/10 dark:bg-zinc-900 dark:hover:border-indigo-500"
               >
                 {i.suggested_done === 1 ? (
                   <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
                     looks done?
+                  </span>
+                ) : i.kind === "failure" ? (
+                  // Failures reach this list by recurring, not by priority — which most of them
+                  // don't set, so PRIORITY_LABEL would render nothing at all.
+                  <span className="shrink-0 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                    seen {i.times_seen}×
                   </span>
                 ) : (
                   pri && (

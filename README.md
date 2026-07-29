@@ -4,8 +4,8 @@
 
 Turn your Claude Code conversations into a visual project workspace. The dashboard scans
 your local conversation transcripts and surfaces, per project, a **Kanban task board** plus
-**Suggestions** and **Research** (web-sourced feature ideas) — so the ideas
-and to‑dos that normally scroll away in chat don't get lost.
+**Suggestions**, **Research** (web-sourced feature ideas) and **Failures** — so the ideas,
+to‑dos and broken things that normally scroll away in chat don't get lost.
 
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash
   command uses your current session; backfill and the dashboard's "Scan" button use headless
@@ -22,6 +22,14 @@ and to‑dos that normally scroll away in chat don't get lost.
   **Promote** a suggestion onto the board, **Dismiss** items (restorable from a Dismissed section),
   copy a task or plan to the clipboard, and hit **Implement** to draft a read-only plan by resuming
   the task's source chat. Scans stream **live step-by-step progress**.
+- **Failures tab** — things that broke and *stayed* broken (rate limits, failed builds, bad API
+  responses) are captured as their own kind, not lost in the chat scrollback. Each one counts how
+  many scans it has recurred in (`seen 3×`) and sorts by that, because the thing that keeps
+  happening is the thing worth fixing. **"How do I fix this?"** runs a web-search agent on that
+  specific error and stores a sourced remediation writeup — what it means, the likely cause, the
+  fix, how to verify, and a durable mitigation, each claim traceable to a link. **Create fix task**
+  puts the work on the board while the failure stays put, so a recurrence during the fix still
+  counts. Recurring failures also surface in the overview's "Needs you" list.
 
 ![AI Project Dashboard — per-project Kanban board with AI-assigned priorities](docs/screenshot.png)
 
@@ -131,6 +139,8 @@ block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
 | `CLAUDE_APPLY_BUDGET_USD` | `1.00` | Per-call spend cap for "Apply on a branch" (edits enabled) |
 | `CLAUDE_RESEARCH_MODEL` | `sonnet` | Model for "Use Internet for Research" (web search + synthesis) |
 | `CLAUDE_RESEARCH_BUDGET_USD` | `0.50` | Per-call spend cap for web research |
+| `CLAUDE_FIX_RESEARCH_MODEL` | `sonnet` | Model for "How do I fix this?" on a captured failure |
+| `CLAUDE_FIX_RESEARCH_BUDGET_USD` | `0.50` | Per-call spend cap for fix research |
 | `CHUNK_CHARS` | `120000` | Max characters per extraction chunk |
 | `SCAN_MAX_CHUNKS` | `16` | Max chunks per conversation scan (bounds cost) |
 | `SCAN_PLAN_FILES` | `1` | Set `0` to skip folding plan-file backlogs into scans |

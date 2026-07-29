@@ -32,6 +32,7 @@ const CLAUDE_MD_BLOCK = `${CLAUDE_MD_START}
 
 Conversations are captured to a local Kanban dashboard at ${dashboardDir}.
 - When you give the user an actionable **task** or a **suggestion** (advice / an "Optional Next Step:"), state it clearly so it can be captured.
+- When something **fails and stays broken** (a rate limit, failed build, bad API response, exhausted quota), say so plainly — including the status/exit code and the service — so it can be captured and fixed.
 - The user can run **\`/sync-board\`** to pull this conversation's items into the dashboard.
 - A SessionEnd hook flags each conversation as \`needs_scan\`; the user scans it from the dashboard UI or with \`/sync-board\`.
 ${CLAUDE_MD_END}`;

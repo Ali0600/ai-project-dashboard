@@ -6,8 +6,14 @@ import { getDb } from "./db";
 import {
   collapseDuplicateTasks,
   countLostConversations,
+  createFixTaskFromFailure,
+  deriveResearchTopic,
   flagSuggestedDone,
   markConversationLost,
+  openFailureTitles,
+  openItemTitles,
+  recordFailureOccurrence,
+  sameFailure,
   getOrCreateProject,
   hasUnscannedActivity,
   insertItem,
@@ -208,6 +214,132 @@ describe("collapseDuplicateTasks", () => {
     expect(byTitle("Add EXPO_TOKEN GitHub secret")?.status).toBe("done"); // canonical kept
     expect(byTitle("Add EXPO_TOKEN secret to GitHub")?.status).toBe("dismissed"); // reworded dup
     expect(byTitle("Deploy to Render with monitoring")?.status).toBe("todo"); // distinct, untouched
+  });
+});
+
+describe("sameFailure: error signatures decide, not token overlap", () => {
+  it("refuses to merge two failures that differ only by status code", () => {
+    // Plain Jaccard scores this 0.667 (>= 0.6) and would MERGE them, silently folding a 502 into
+    // the 500's recurrence count.
+    expect(sameFailure("API request failed with HTTP 500", "API request failed with HTTP 502")).toBe(
+      false,
+    );
+  });
+
+  it("refuses to merge the same status code from different hosts", () => {
+    expect(
+      sameFailure("HTTP 429 rate limit from oppp.online", "HTTP 429 rate limit from tcgplayer.com"),
+    ).toBe(false);
+  });
+
+  it("matches the same failure reworded by the model", () => {
+    // Plain Jaccard scores this 0.455 (< 0.6) and would SPLIT one failure across two rows, so its
+    // recurrence would never be counted.
+    expect(
+      sameFailure(
+        "oppp.online returns HTTP 429 during reference download",
+        "oppp.online rate-limits reference downloads (HTTP 429)",
+      ),
+    ).toBe(true);
+  });
+
+  it("falls back to the generic reworded-title rule when neither title has a signature", () => {
+    expect(sameFailure("Build step keeps hanging forever", "Build step keeps hanging")).toBe(true);
+    expect(sameFailure("Build step keeps hanging forever", "Docs are out of date")).toBe(false);
+  });
+});
+
+describe("recordFailureOccurrence: what recurrence MEANS depends on status", () => {
+  const seed = (projectId: number, title: string, status: string) =>
+    getDb()
+      .prepare(
+        "INSERT INTO items (project_id, kind, title, status, norm_key) VALUES (?, 'failure', ?, ?, ?)",
+      )
+      .run(projectId, title, status, normalizeTitle(title)).lastInsertRowid as number;
+  const read = (id: number) =>
+    getDb().prepare("SELECT * FROM items WHERE id = ?").get(id) as {
+      status: string;
+      times_seen: number;
+    };
+
+  it("bumps an open failure", () => {
+    const p = getOrCreateProject("/tmp/store-test-recur-open");
+    const id = seed(p.id, "HTTP 429 rate limit from oppp.online", "todo");
+    expect(recordFailureOccurrence(p.id, "HTTP 429 rate limit from oppp.online", "ev")).toBe("bumped");
+    expect(read(id)).toMatchObject({ status: "todo", times_seen: 2 });
+  });
+
+  it("reopens a failure that recurred after being marked done", () => {
+    const p = getOrCreateProject("/tmp/store-test-recur-done");
+    const id = seed(p.id, "ECONNRESET from registry.example", "done");
+    expect(recordFailureOccurrence(p.id, "ECONNRESET from registry.example", "came back")).toBe(
+      "reopened",
+    );
+    // A fix that didn't hold is the most valuable signal here — it must not tick up invisibly.
+    expect(read(id)).toMatchObject({ status: "todo", times_seen: 2 });
+  });
+
+  it("leaves a dismissed failure completely alone", () => {
+    const p = getOrCreateProject("/tmp/store-test-recur-dismissed");
+    const id = seed(p.id, "HTTP 503 from flaky.example", "dismissed");
+    expect(recordFailureOccurrence(p.id, "HTTP 503 from flaky.example", "ev")).toBe("ignored");
+    expect(read(id)).toMatchObject({ status: "dismissed", times_seen: 1 });
+  });
+
+  it("reports missing when nothing matches", () => {
+    const p = getOrCreateProject("/tmp/store-test-recur-missing");
+    expect(recordFailureOccurrence(p.id, "HTTP 418 from nowhere.example", "ev")).toBe("missing");
+  });
+});
+
+describe("failure kind isolation", () => {
+  it("dedups only against failures, never against a task of the same name", () => {
+    const p = getOrCreateProject("/tmp/store-test-failure-dedup");
+    const title = "HTTP 429 rate limit from oppp.online";
+    // A "Fix: <failure>" task must never block the failure itself from being recorded.
+    insertItem({ projectId: p.id, kind: "task", title });
+    const failure = insertItem({ projectId: p.id, kind: "failure", title });
+    expect(failure).not.toBeNull();
+    // The same failure again is a duplicate (ingest turns this into a recurrence bump).
+    expect(insertItem({ projectId: p.id, kind: "failure", title })).toBeNull();
+  });
+
+  it("is invisible to task-only machinery", () => {
+    const p = getOrCreateProject("/tmp/store-test-failure-isolation");
+    const title = "HTTP 500 from build.example";
+    insertItem({ projectId: p.id, kind: "failure", title });
+    // Completion detection is task-only — a failure must never be flagged "looks done?".
+    expect(flagSuggestedDone(p.id, title, "ev")).toBe(false);
+    // Failure titles are error signatures; they'd derail a query describing what the project IS.
+    expect(deriveResearchTopic(p.id)).not.toContain("HTTP 500");
+    // And they must not be fed to the extractor's "do not duplicate" list, or recurrence dies.
+    expect(openItemTitles(p.id)).not.toContain(title);
+    expect(openFailureTitles(p.id)).toContain(title);
+  });
+});
+
+describe("createFixTaskFromFailure keeps the failure countable", () => {
+  it("spawns a task without converting the failure", () => {
+    const p = getOrCreateProject("/tmp/store-test-fixtask");
+    const title = "HTTP 429 rate limit from api.example";
+    const failureId = insertItem({ projectId: p.id, kind: "failure", title, detail: "blocked" })!;
+    getDb().prepare("UPDATE items SET fix_research = ? WHERE id = ?").run("WEB SOURCED TEXT", failureId);
+
+    const res = createFixTaskFromFailure(failureId);
+    expect(res).not.toBe("missing");
+    expect(res).not.toBe("not_failure");
+    const taskId = (res as { taskId: number }).taskId;
+
+    const failure = listItems(p.id, "failure").find((i) => i.id === failureId)!;
+    // Converting would drop it out of openFailureTitles and reset the count on the next recurrence.
+    expect(failure.kind).toBe("failure");
+    expect(failure.status).toBe("in_progress");
+    expect(openFailureTitles(p.id)).toContain(title);
+
+    const task = listItems(p.id, "task").find((i) => i.id === taskId)!;
+    // The task's detail feeds the edit-enabled apply agent — web-sourced text must never reach it.
+    expect(task.detail).not.toContain("WEB SOURCED TEXT");
+    expect(task.detail).toContain("blocked");
   });
 });
 

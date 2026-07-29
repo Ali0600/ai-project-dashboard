@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { spawnEnv } from "./claude";
+import { mergeExtractions, spawnEnv } from "./claude";
+import { ExtractionResult } from "./types";
 
 describe("spawnEnv", () => {
   // Spread the real env so the object satisfies NodeJS.ProcessEnv, then override the keys we assert.
@@ -33,5 +34,21 @@ describe("spawnEnv", () => {
   it("does not mutate the caller's base env", () => {
     spawnEnv(base, true);
     expect(base.ANTHROPIC_API_KEY).toBe("sk-stale");
+  });
+});
+
+describe("mergeExtractions carries every category across chunks", () => {
+  it("merges failures from separate chunks", () => {
+    // A category needs edits in BOTH the initializer and the push loop. Missing the initializer is
+    // a compile error; missing the push is silent — every chunk after the first vanishes, and only
+    // on multi-chunk (long) transcripts. This test is the guard for that half.
+    const chunk = (title: string) =>
+      ExtractionResult.parse({ failures: [{ title }], tasks: [{ title: `t-${title}` }] });
+    const merged = mergeExtractions([chunk("HTTP 429 from a.example"), chunk("HTTP 500 from b.example")]);
+    expect(merged.failures.map((f) => f.title)).toEqual([
+      "HTTP 429 from a.example",
+      "HTTP 500 from b.example",
+    ]);
+    expect(merged.tasks).toHaveLength(2);
   });
 });

@@ -2,15 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatDate } from "@/lib/format";
-import type { ItemStatus, ItemWithSource } from "@/lib/types";
+import type { ItemKind, ItemStatus, ItemWithSource } from "@/lib/types";
 import CopyButton from "./CopyButton";
 import type { ApplyOutcome } from "./ProjectDashboard";
 import PriorityPill from "./PriorityPill";
 
-const KIND_LABEL: Record<string, string> = {
+// Record<ItemKind,…> (not Record<string,…>) so adding a kind is a compile error here rather than a
+// silent fallback to the raw slug.
+const KIND_LABEL: Record<ItemKind, string> = {
   task: "Task",
   suggestion: "Suggestion",
   research: "Research",
+  failure: "Failure",
 };
 
 const STATUS_OPTIONS: { value: ItemStatus; label: string }[] = [
@@ -29,6 +32,7 @@ export default function ItemDetail({
   onImplement,
   onApply,
   onPromote,
+  onFixResearch,
 }: {
   item: ItemWithSource | null;
   onClose: () => void;
@@ -39,12 +43,16 @@ export default function ItemDetail({
   onImplement: (id: number) => Promise<void>;
   onApply: (id: number) => Promise<ApplyOutcome>;
   onPromote: (id: number) => void;
+  onFixResearch: (id: number) => Promise<void>;
 }) {
   const [implBusy, setImplBusy] = useState(false);
   const [implError, setImplError] = useState<string | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyNote, setApplyNote] = useState<string | null>(null);
+  const [fixBusy, setFixBusy] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
+  const [fixSecs, setFixSecs] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   // True only when the pointer press that produced a click STARTED on the backdrop. A click whose
   // mousedown/mouseup land on different elements is dispatched at their common ancestor (the
@@ -67,9 +75,32 @@ export default function ItemDetail({
     };
   }, [item, onClose]);
 
+  // Web research takes minutes; a static "Researching…" is indistinguishable from a hang, so show
+  // the elapsed time as a liveness signal.
+  useEffect(() => {
+    if (!fixBusy) return;
+    const started = Date.now();
+    const t = setInterval(() => setFixSecs(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [fixBusy]);
+
   if (!item) return null;
 
   const isTask = item.kind === "task";
+  const isFailure = item.kind === "failure";
+
+  async function runFixResearch() {
+    setFixSecs(0);
+    setFixBusy(true);
+    setFixError(null);
+    try {
+      await onFixResearch(item!.id);
+    } catch (e) {
+      setFixError((e as Error).message);
+    } finally {
+      setFixBusy(false);
+    }
+  }
 
   async function runImplement() {
     setImplBusy(true);
@@ -223,6 +254,44 @@ export default function ItemDetail({
           </p>
         </div>
 
+        {/* How do I fix this? (failures only) — web-sourced remediation, review-only. */}
+        {isFailure && (
+          <div className="mt-4 border-t border-black/10 pt-3 dark:border-white/10">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Fix research
+                {item.times_seen > 1 && (
+                  <span className="ml-2 font-normal normal-case text-rose-600 dark:text-rose-400">
+                    seen {item.times_seen}× — worth fixing properly
+                  </span>
+                )}
+              </p>
+              <div className="flex items-center gap-2">
+                {item.fix_research && <CopyButton text={item.fix_research} label="Copy" />}
+                <button
+                  onClick={runFixResearch}
+                  disabled={fixBusy}
+                  title="Search the web for how to fix this error (reads the web only — changes nothing)"
+                  className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {fixBusy ? "Researching…" : item.fix_research ? "Re-research" : "🌐 How do I fix this?"}
+                </button>
+              </div>
+            </div>
+            {fixBusy && (
+              <p className="mt-2 text-xs text-zinc-500">
+                Searching docs, issues and forums for this error… {fixSecs}s
+              </p>
+            )}
+            {fixError && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{fixError}</p>}
+            {item.fix_research && (
+              <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md bg-black/5 p-3 text-xs leading-relaxed text-zinc-700 dark:bg-white/5 dark:text-zinc-300">
+                {item.fix_research}
+              </pre>
+            )}
+          </div>
+        )}
+
         {/* Implementation plan (tasks only) */}
         {isTask && (
           <div className="mt-4 border-t border-black/10 pt-3 dark:border-white/10">
@@ -304,16 +373,20 @@ export default function ItemDetail({
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {/* Research ideas are promotable too — the modal is exactly where you read the source
               link and decide to act on it. */}
-          {(item.kind === "suggestion" || item.kind === "research") && (
+          {(item.kind === "suggestion" || item.kind === "research" || isFailure) && (
             <button
               onClick={() => {
                 onPromote(item.id);
                 onClose();
               }}
-              title="Move this suggestion onto the Board as a task"
+              title={
+                isFailure
+                  ? "Create a Board task to fix this. The failure stays here so recurrences keep counting."
+                  : "Move this suggestion onto the Board as a task"
+              }
               className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700"
             >
-              ▶ Promote to task
+              {isFailure ? "▶ Create fix task" : "▶ Promote to task"}
             </button>
           )}
           {isTask ? (

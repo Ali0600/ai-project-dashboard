@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS items (
   apply_branch    TEXT,
   apply_diff      TEXT,
   sort_order      INTEGER NOT NULL DEFAULT 0,
+  times_seen      INTEGER NOT NULL DEFAULT 1,
+  fix_research    TEXT,
   norm_key        TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -113,6 +115,10 @@ function migrate(db: Database.Database): void {
   ensure("apply_branch", "apply_branch TEXT");
   ensure("apply_diff", "apply_diff TEXT");
   ensure("source_url", "source_url TEXT");
+  // Failure recurrence + its fix writeup. DEFAULT 1 matches the SCHEMA default exactly (CLAUDE.md),
+  // and covers existing rows without a backfill pass — every pre-existing item has been "seen" once.
+  ensure("times_seen", "times_seen INTEGER NOT NULL DEFAULT 1");
+  ensure("fix_research", "fix_research TEXT");
 
   // Manual within-column ordering: add `sort_order` once, seeding each task's initial position from
   // the existing (priority ASC, id DESC) order per (project, status) so boards don't reshuffle on

@@ -11,12 +11,18 @@ const TABS: { key: ItemKind; label: string; empty: string }[] = [
   { key: "task", label: "Board", empty: "" },
   { key: "suggestion", label: "Suggestions", empty: "No suggestions captured yet." },
   { key: "research", label: "Research", empty: 'No research yet — click "Use Internet for Research".' },
+  {
+    key: "failure",
+    label: "Failures",
+    empty: "No unresolved failures captured. Things that broke and stayed broken land here.",
+  },
 ];
 
 const KIND_NOUN: Record<ItemKind, string> = {
   task: "task",
   suggestion: "suggestion",
   research: "idea",
+  failure: "failure",
 };
 
 /** Result of an "apply on a branch" run, surfaced in the detail modal. */
@@ -92,15 +98,18 @@ export default function ProjectDashboard({
   conversationIds = [],
   pendingConversationIds = [],
   derivedTopic = "",
+  initialTab = "task",
 }: {
   initialItems?: ItemWithSource[];
   projectId: number;
   conversationIds?: number[];
   pendingConversationIds?: number[];
   derivedTopic?: string;
+  /** Which tab to open on (from `?tab=`), so a deep link can land on Failures. */
+  initialTab?: ItemKind;
 }) {
   const [items, setItems] = useState<ItemWithSource[]>(initialItems);
-  const [active, setActive] = useState<ItemKind>("task");
+  const [active, setActive] = useState<ItemKind>(initialTab);
   const [query, setQuery] = useState("");
   // Web-research ("Use Internet for Research")
   const [showResearch, setShowResearch] = useState(false);
@@ -181,6 +190,25 @@ export default function ProjectDashboard({
     setItems((prev) =>
       prev.map((i) => (i.id === id ? { ...i, implementation_plan: json.plan } : i)),
     );
+  }
+
+  // Research how to fix a failure on the web (read-only, review-only); persists the writeup.
+  async function fixResearch(id: number): Promise<void> {
+    const res = await fetch(`/api/items/${id}/fix-research`, { method: "POST" });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Fix research failed");
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, fix_research: json.research } : i)));
+  }
+
+  // Spawn a task to fix a failure. The failure stays a failure (so recurrences keep counting), so
+  // refetch to pick up both the new task and the failure's in_progress status.
+  async function createFixTask(id: number): Promise<void> {
+    const ok = await patch(id, { createFixTask: true });
+    if (!ok) {
+      await onWriteFailed("the fix task");
+      return;
+    }
+    await refetch();
   }
 
   // Apply the plan on an isolated git branch (edits enabled, nothing pushed); persists branch + diff.
@@ -557,13 +585,16 @@ export default function ProjectDashboard({
         </div>
       ) : (
         <ItemList
-          items={items.filter((i) => i.kind === active && matchesQuery(i))}
+          items={items
+            .filter((i) => i.kind === active && matchesQuery(i))
+            // Failures lead with what keeps happening — recurrence is the whole point of the tab.
+            .sort((a, b) => (active === "failure" ? b.times_seen - a.times_seen : 0))}
           emptyLabel={TABS.find((t) => t.key === active)!.empty}
           filtered={query.trim() !== "" && items.some((i) => i.kind === active)}
           recentlyAdded={recentlyAdded}
           onSetStatus={setStatus}
           onOpenDetail={setSelectedId}
-          onPromote={promote}
+          onPromote={active === "failure" ? createFixTask : promote}
         />
       )}
 
@@ -608,7 +639,8 @@ export default function ProjectDashboard({
         onPriorityChange={setPriority}
         onImplement={implement}
         onApply={apply}
-        onPromote={promote}
+        onPromote={selected?.kind === "failure" ? createFixTask : promote}
+        onFixResearch={fixResearch}
       />
     </div>
   );

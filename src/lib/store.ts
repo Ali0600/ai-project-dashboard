@@ -82,11 +82,57 @@ export function titleJaccard(a: string, b: string): { score: number; shared: num
 /** Minimum Jaccard + shared tokens for two titles to count as the same item (reworded). */
 const DEDUP_JACCARD = 0.6;
 
+/**
+ * The identifying marks of an error: HTTP/exit status codes, error constants, and hostnames.
+ * These are what make two failures the *same* failure — everything else in the title is prose.
+ */
+export function failureSignature(text: string): Set<string> {
+  const sig = new Set<string>();
+  const lower = text.toLowerCase();
+  for (const m of lower.matchAll(/\b[1-5]\d{2}\b/g)) sig.add(`status:${m[0]}`);
+  for (const m of text.matchAll(/\b(?:E[A-Z]{2,}|ERR_[A-Z_]+)\b/g)) sig.add(`code:${m[0]}`);
+  for (const m of lower.matchAll(/\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+\.[a-z]{2,}\b/g)) {
+    sig.add(`host:${m[0]}`);
+  }
+  for (const m of lower.matchAll(/\b[a-z0-9][a-z0-9-]*\.(?:com|org|net|io|dev|online|app|ai)\b/g)) {
+    sig.add(`host:${m[0]}`);
+  }
+  return sig;
+}
+
+/**
+ * Are two failure titles the same failure? Plain token overlap is wrong for error signatures in
+ * BOTH directions, measured with the real helpers: "…HTTP 500" vs "…HTTP 502" scores 0.667 and
+ * would wrongly MERGE two distinct failures into one counter, while "oppp.online returns HTTP 429
+ * during reference download" vs "oppp.online rate-limits reference downloads (HTTP 429)" scores
+ * 0.455 and would wrongly SPLIT one failure across two rows.
+ *
+ * So the signature decides: differing signatures veto a match outright; matching signatures need
+ * only one more shared word. Only when neither title carries a signature do we fall back to the
+ * generic reworded-title rule.
+ */
+export function sameFailure(a: string, b: string): boolean {
+  const sigA = failureSignature(a);
+  const sigB = failureSignature(b);
+  if (sigA.size > 0 && sigB.size > 0) {
+    const sameSig = sigA.size === sigB.size && [...sigA].every((s) => sigB.has(s));
+    if (!sameSig) return false; // 500 vs 502, oppp.online vs tcgplayer.com — different failures
+    const { shared } = titleJaccard(a, b);
+    return shared >= 1; // same signature + any shared context → the same failure, reworded
+  }
+  const { score, shared } = titleJaccard(a, b);
+  return shared >= 2 && score >= DEDUP_JACCARD;
+}
+
+/** Decides whether an incoming title duplicates a stored one. Defaults to the reworded-title rule. */
+export type DuplicateMatcher = (incoming: string, existing: string) => boolean;
+
 /** Find an existing item (of any of `kinds`, any status) that is a reworded duplicate of `title`. */
 export function findFuzzyDuplicate(
   projectId: number,
   kinds: ItemKind | ItemKind[],
   title: string,
+  matcher?: DuplicateMatcher,
 ): ItemRow | undefined {
   const list = Array.isArray(kinds) ? kinds : [kinds];
   if (list.length === 0) return undefined;
@@ -94,6 +140,7 @@ export function findFuzzyDuplicate(
   const items = getDb()
     .prepare(`SELECT * FROM items WHERE project_id = ? AND kind IN (${placeholders})`)
     .all(projectId, ...list) as ItemRow[];
+  if (matcher) return items.find((it) => matcher(title, it.title));
   let best: ItemRow | undefined;
   let bestScore = 0;
   for (const it of items) {
@@ -170,6 +217,7 @@ export interface AttentionItem {
   priority: number;
   status: ItemStatus;
   suggested_done: 0 | 1;
+  times_seen: number;
   updated_at: string;
 }
 
@@ -183,12 +231,16 @@ export function listAttentionItems(limit = 10): AttentionItem[] {
   return getDb()
     .prepare(
       `SELECT i.id, i.project_id, p.name AS project_name, i.kind, i.title, i.priority, i.status,
-              i.suggested_done, i.updated_at
+              i.suggested_done, i.times_seen, i.updated_at
          FROM items i
          JOIN projects p ON p.id = i.project_id
         WHERE i.status IN ('todo','in_progress')
-          AND (i.suggested_done = 1 OR (i.kind = 'task' AND i.priority <= 2))
-        ORDER BY i.suggested_done DESC, i.priority ASC, i.updated_at DESC
+          AND (
+            (i.kind = 'task' AND i.suggested_done = 1)
+            OR (i.kind = 'task' AND i.priority <= 2)
+            OR (i.kind = 'failure' AND i.times_seen >= 2)
+          )
+        ORDER BY i.suggested_done DESC, i.times_seen DESC, i.priority ASC, i.updated_at DESC
         LIMIT ?`,
     )
     .all(limit) as AttentionItem[];
@@ -392,10 +444,28 @@ export function openTasks(projectId: number): { id: number; title: string }[] {
 
 /** Titles of open items, used to tell the extractor what already exists. */
 export function openItemTitles(projectId: number): string[] {
+  // Tasks + suggestions only. This list is injected into the extraction prompt under "do NOT
+  // duplicate", so including failures would instruct the model never to report a known failure
+  // again — killing the recurrence signal silently. Failures get their own inverted block.
   return (
     getDb()
       .prepare(
-        "SELECT title FROM items WHERE project_id = ? AND status IN ('todo','in_progress') ORDER BY id DESC",
+        `SELECT title FROM items
+           WHERE project_id = ? AND kind IN ('task','suggestion') AND status IN ('todo','in_progress')
+           ORDER BY id DESC`,
+      )
+      .all(projectId) as { title: string }[]
+  ).map((r) => r.title);
+}
+
+/** Open failures, for the prompt block that asks the model to RE-report them when they recur. */
+export function openFailureTitles(projectId: number): string[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT title FROM items
+           WHERE project_id = ? AND kind = 'failure' AND status IN ('todo','in_progress')
+           ORDER BY times_seen DESC, id DESC`,
       )
       .all(projectId) as { title: string }[]
   ).map((r) => r.title);
@@ -409,9 +479,14 @@ export function openItemTitles(projectId: number): string[] {
 export function deriveResearchTopic(projectId: number): string {
   const project = getProject(projectId);
   const name = project?.name ?? "";
+  // Tasks + suggestions only: failure titles are error signatures ("HTTP 429 from oppp.online"),
+  // which would derail a query meant to describe what the project IS.
   const titles = (
     getDb()
-      .prepare("SELECT title FROM items WHERE project_id = ? ORDER BY id DESC LIMIT 6")
+      .prepare(
+        `SELECT title FROM items
+           WHERE project_id = ? AND kind IN ('task','suggestion') ORDER BY id DESC LIMIT 6`,
+      )
       .all(projectId) as { title: string }[]
   ).map((r) => r.title);
   return titles.length ? `${name} — ${titles.join("; ")}` : name;
@@ -442,6 +517,9 @@ export function insertItem(a: InsertItemArgs): number | null {
   // EXPO_TOKEN secret" doesn't come back as a suggestion once it's a done task. Research ideas
   // dedup against task+suggestion+research so the web flow never resurfaces already-tracked work
   // or repeats an idea across runs.
+  // Failures dedup ONLY against failures — never against tasks: a "Fix: <failure>" task must not
+  // stop the failure it names from being recorded. They also use the signature matcher, because
+  // token overlap can't tell HTTP 500 from HTTP 502.
   const dupKinds: ItemKind[] | null =
     a.kind === "suggestion"
       ? ["task", "suggestion"]
@@ -449,8 +527,11 @@ export function insertItem(a: InsertItemArgs): number | null {
         ? ["task"]
         : a.kind === "research"
           ? ["task", "suggestion", "research"]
-          : null;
-  if (dupKinds && findFuzzyDuplicate(a.projectId, dupKinds, a.title)) return null;
+          : a.kind === "failure"
+            ? ["failure"]
+            : null;
+  const matcher = a.kind === "failure" ? sameFailure : undefined;
+  if (dupKinds && findFuzzyDuplicate(a.projectId, dupKinds, a.title, matcher)) return null;
 
   const info = db
     .prepare(
@@ -472,6 +553,47 @@ export function insertItem(a: InsertItemArgs): number | null {
       norm_key: normKey,
     });
   return info.changes > 0 ? Number(info.lastInsertRowid) : null;
+}
+
+/**
+ * A failure was reported again. Called when `insertItem` refuses a duplicate failure, so the
+ * recurrence is counted instead of silently dropped.
+ *
+ * The status decides what recurrence MEANS, and conflating these is what would make the counter
+ * useless:
+ *  - open (`todo`/`in_progress`) → it's still happening; bump the count.
+ *  - `done` → a failure we believed fixed came back. That's the single most valuable event this
+ *    feature can surface, so bump AND reopen it rather than quietly incrementing a closed row.
+ *  - `dismissed` → the user's explicit "don't show me this". A tombstone stays dead; no bump, or
+ *    it would resurface with an inflated count on Restore.
+ */
+export function recordFailureOccurrence(
+  projectId: number,
+  title: string,
+  evidence?: string,
+): "bumped" | "reopened" | "ignored" | "missing" {
+  const db = getDb();
+  const row =
+    (db
+      .prepare("SELECT * FROM items WHERE project_id = ? AND kind = 'failure' AND norm_key = ?")
+      .get(projectId, normalizeTitle(title)) as ItemRow | undefined) ??
+    findFuzzyDuplicate(projectId, ["failure"], title, sameFailure);
+  if (!row) return "missing";
+  if (row.status === "dismissed") return "ignored";
+
+  if (row.status === "done") {
+    db.prepare(
+      `UPDATE items
+          SET times_seen = times_seen + 1, status = 'todo', suggested_done = 0,
+              done_evidence = ?, updated_at = datetime('now')
+        WHERE id = ?`,
+    ).run(evidence?.slice(0, 500) || "Recurred after being marked done", row.id);
+    return "reopened";
+  }
+  db.prepare(
+    "UPDATE items SET times_seen = times_seen + 1, updated_at = datetime('now') WHERE id = ?",
+  ).run(row.id);
+  return "bumped";
 }
 
 /** True if a non-dismissed task with this norm_key already exists in the project. */
@@ -634,6 +756,7 @@ export function reorderTasks(projectId: number, status: ItemStatus, orderedIds: 
 export interface ItemContext {
   item: ItemRow;
   projectCwd: string;
+  projectName: string;
   sessionId: string | null;
 }
 
@@ -641,22 +764,83 @@ export interface ItemContext {
 export function getItemContext(id: number): ItemContext | undefined {
   const row = getDb()
     .prepare(
-      `SELECT i.*, p.cwd AS project_cwd, c.session_id AS session_id
+      `SELECT i.*, p.cwd AS project_cwd, p.name AS project_name, c.session_id AS session_id
          FROM items i
          JOIN projects p ON p.id = i.project_id
          LEFT JOIN conversations c ON c.id = i.conversation_id
         WHERE i.id = ?`,
     )
-    .get(id) as (ItemRow & { project_cwd: string; session_id: string | null }) | undefined;
+    .get(id) as
+    | (ItemRow & { project_cwd: string; project_name: string; session_id: string | null })
+    | undefined;
   if (!row) return undefined;
-  const { project_cwd, session_id, ...item } = row;
-  return { item: item as ItemRow, projectCwd: project_cwd, sessionId: session_id };
+  const { project_cwd, project_name, session_id, ...item } = row;
+  return {
+    item: item as ItemRow,
+    projectCwd: project_cwd,
+    projectName: project_name,
+    sessionId: session_id,
+  };
 }
 
 export function saveImplementationPlan(id: number, plan: string): void {
   getDb()
     .prepare("UPDATE items SET implementation_plan = ?, updated_at = datetime('now') WHERE id = ?")
     .run(plan, id);
+}
+
+/** Persist the sourced remediation writeup from a "How do I fix this?" run. */
+export function saveFixResearch(id: number, research: string): void {
+  getDb()
+    .prepare("UPDATE items SET fix_research = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(research, id);
+}
+
+/**
+ * Spawn a task to fix a failure. Deliberately NOT a kind conversion (the way suggestions promote):
+ * the failure row must stay a failure so it keeps appearing in `openFailureTitles` — a recurrence
+ * while the fix is in flight is exactly the signal worth having, and converting would reset the
+ * count and leave a stray duplicate failure on the next scan.
+ *
+ * The task carries the FAILURE's detail, never `fix_research`: that writeup is web-sourced text,
+ * and a task's detail is fed straight into the edit-enabled apply agent.
+ */
+export function createFixTaskFromFailure(id: number): { taskId: number } | "missing" | "not_failure" {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(id) as ItemRow | undefined;
+  if (!row) return "missing";
+  if (row.kind !== "failure") return "not_failure";
+
+  const title = `Fix: ${row.title}`;
+  const detail = [row.detail, `(From failure #${row.id}, seen ${row.times_seen}×.)`]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const taskId = insertItem({
+    projectId: row.project_id,
+    conversationId: row.conversation_id,
+    kind: "task",
+    title,
+    detail,
+    priority: "high",
+    sourceQuote: row.source_quote ?? "",
+  });
+  // A duplicate fix task already exists — reuse it rather than failing the click.
+  const existing =
+    taskId == null
+      ? (db
+          .prepare(
+            "SELECT id FROM items WHERE project_id = ? AND kind = 'task' AND norm_key = ?",
+          )
+          .get(row.project_id, normalizeTitle(title)) as { id: number } | undefined)
+      : undefined;
+  const finalId = taskId ?? existing?.id;
+  if (finalId == null) return "missing";
+
+  db.prepare(
+    "UPDATE items SET status = 'in_progress', updated_at = datetime('now') WHERE id = ?",
+  ).run(row.id);
+  return { taskId: finalId };
 }
 
 /** Persist the branch + diff produced by an "apply on a branch" run. */

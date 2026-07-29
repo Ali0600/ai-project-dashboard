@@ -10,6 +10,7 @@ Return **only** a JSON object with this exact shape:
 {
   "tasks":       [{"title": "", "detail": "", "status_guess": "todo|in_progress|done", "priority": "urgent|high|medium|low", "source_quote": ""}],
   "suggestions": [{"title": "", "detail": "", "source_quote": ""}],
+  "failures":    [{"title": "", "detail": "", "source_quote": ""}],
   "completed":   [{"existing_id_or_title": "", "evidence_quote": ""}]
 }
 ```
@@ -20,6 +21,15 @@ Return **only** a JSON object with this exact shape:
   `priority`: urgent (blockers/security/broken builds), high, medium (default), low (nice-to-have).
 - **suggestions** — advice, ideas, or optional next steps the assistant proposed that are NOT
   already concrete committed tasks ("you should", "I recommend", "consider", "Optional Next Step:").
+- **failures** — things that went wrong and are **still a problem**. Include one only if **both**:
+  (a) it is NOT resolved in the conversation (still blocking, still recurring, or only worked
+  around by the end), and (b) it is external or systemic — an error from a tool, API, service,
+  build, test, or dependency (HTTP status, exit code, exception, timeout, quota, auth failure).
+  Lead the title with the error signature: `HTTP 429 rate limit from oppp.online`. Always exclude
+  typos fixed next turn, a test that failed once then passed, anything working by the end, and
+  risks that haven't actually happened. If in doubt, leave it out.
+  Failures listed under **KNOWN FAILURES** are the one exception to the no-duplicates rule:
+  re-report one (using its exact title) when it happens again — recurrence is the signal.
 - **completed** — items from the supplied EXISTING OPEN ITEMS list that the conversation
   shows are now finished. Reference the existing item by its exact title (or id) and quote
   the evidence.

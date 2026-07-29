@@ -72,27 +72,43 @@ export default function ItemList({
                 >
                   {item.title}
                 </p>
-                {isNew && (
-                  <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                    New
-                  </span>
-                )}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {/* Recurrence is the reason a failure matters — surface it on the row itself. */}
+                  {item.kind === "failure" && item.times_seen > 1 && (
+                    <span
+                      title={`Reported in ${item.times_seen} separate scans`}
+                      className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-500/20 dark:text-rose-300"
+                    >
+                      seen {item.times_seen}×
+                    </span>
+                  )}
+                  {isNew && (
+                    <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                      New
+                    </span>
+                  )}
+                </span>
               </div>
               {item.detail && (
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{item.detail}</p>
               )}
               <SourceLine item={item} />
             </div>
-            {(item.kind === "suggestion" || item.kind === "research") && onPromote && (
+            {(item.kind === "suggestion" || item.kind === "research" || item.kind === "failure") &&
+              onPromote && (
               <button
-                title="Promote to a Board task"
+                title={
+                  item.kind === "failure"
+                    ? "Create a task to fix this (the failure stays here so recurrences keep counting)"
+                    : "Promote to a Board task"
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   onPromote(item.id);
                 }}
                 className="shrink-0 rounded-lg border border-indigo-300 px-2 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
               >
-                → Task
+                {item.kind === "failure" ? "→ Fix task" : "→ Task"}
               </button>
             )}
             <button

@@ -7,6 +7,7 @@ import {
   getConversationBySession,
   markConversationLost,
   markConversationScanned,
+  openFailureTitles,
   openItemTitles,
   upsertConversation,
 } from "./store";
@@ -142,6 +143,9 @@ export async function scanTranscript(
   const chunks = [...transcriptChunks, ...planChunks];
 
   const existingTitles = openItemTitles(conv.project_id);
+  // Passed separately from `existingTitles` because the prompt's rule for these is the opposite:
+  // re-report them when they recur (that's the recurrence count).
+  const knownFailures = openFailureTitles(conv.project_id);
   const parts: ExtractionResult[] = [];
   for (let i = 0; i < chunks.length; i++) {
     report({
@@ -150,7 +154,7 @@ export async function scanTranscript(
       total: chunks.length,
       detail: i >= transcriptChunks.length ? "plan backlog" : undefined,
     });
-    parts.push(await extractOnce(chunks[i], existingTitles));
+    parts.push(await extractOnce(chunks[i], existingTitles, knownFailures));
   }
   const merged = mergeExtractions(parts);
 

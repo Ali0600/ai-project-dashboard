@@ -4,12 +4,16 @@ import {
   dismissSuggestionsCollidingWithTasks,
   flagSuggestedDone,
   insertItem,
+  normalizeTitle,
+  recordFailureOccurrence,
 } from "./store";
 import type { ExtractionResult, ResearchIdea } from "./types";
 
 export interface IngestResult {
   created: number;
   flaggedDone: number;
+  /** Known failures reported again by this scan (recurrence counts bumped). */
+  recurred: number;
   createdIds: number[];
 }
 
@@ -63,12 +67,35 @@ export function ingestExtraction(opts: {
       );
     }
 
+    // Failures: a NEW failure becomes a row; a KNOWN one bumps its recurrence count instead.
+    // Collapse repeats within this one extraction first — chunk boundaries are arbitrary, so a
+    // single incident narrated in two chunks must count as one occurrence, not two.
+    let recurred = 0;
+    const seenThisScan = new Set<string>();
+    for (const f of extraction.failures) {
+      const key = normalizeTitle(f.title);
+      if (seenThisScan.has(key)) continue;
+      seenThisScan.add(key);
+      const id = insertItem({
+        projectId,
+        conversationId,
+        kind: "failure",
+        title: f.title,
+        detail: f.detail,
+        sourceQuote: f.source_quote,
+      });
+      if (id != null) add(id);
+      // insertItem stays pure (null = duplicate); the recurrence bookkeeping lives here, where it
+      // can also reopen a failure that was marked done and leave dismissed tombstones alone.
+      else if (recordFailureOccurrence(projectId, f.title, f.source_quote) !== "ignored") recurred++;
+    }
+
     let flaggedDone = 0;
     for (const c of extraction.completed) {
       if (flagSuggestedDone(projectId, c.existing_id_or_title, c.evidence_quote)) flaggedDone++;
     }
 
-    return { created: createdIds.length, flaggedDone, createdIds };
+    return { created: createdIds.length, flaggedDone, recurred, createdIds };
   })();
 }
 

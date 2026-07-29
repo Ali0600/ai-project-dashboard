@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   confirmDone,
+  createFixTaskFromFailure,
   dismissSuggestion,
   promoteToTask,
   updateItemPriority,
@@ -29,6 +30,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     status?: string;
     priority?: string;
     promote?: boolean;
+    createFixTask?: boolean;
     suggestion?: "confirm" | "dismiss";
   };
 
@@ -39,6 +41,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     changed = confirmDone(itemId);
   } else if (body.suggestion === "dismiss") {
     changed = dismissSuggestion(itemId);
+  } else if (body.createFixTask === true) {
+    // Spawns a task; the failure row stays a failure so recurrences keep counting.
+    const result = createFixTaskFromFailure(itemId);
+    if (result === "missing") {
+      return NextResponse.json({ error: "item not found" }, { status: 404 });
+    }
+    if (result === "not_failure") {
+      return NextResponse.json({ error: "only failures can spawn a fix task" }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true, taskId: result.taskId });
   } else if (body.promote === true) {
     const result = promoteToTask(itemId);
     if (result === "missing") {
