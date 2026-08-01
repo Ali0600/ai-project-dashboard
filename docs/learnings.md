@@ -504,3 +504,31 @@ assertable end-to-end even when you can't run the real binary.
 - **Takeaway:** a fake executable on `PATH` is the cheapest way to test what you *spawn*. It
   verifies the real construction path (not a re-implementation of it) and works without
   credentials, network, or the cost of a live call.
+
+## Moving a project invalidates every absolute path baked into its build cache
+Generated caches record where they were built. Move the directory and the cache still points at the
+old location — the tooling then thrashes against paths that no longer exist.
+- **Why it came up:** the repo moved `~/Documents/ai-project-dashboard` → `~/projects/...`. `.next/`
+  had been built a minute earlier at the old path and still recorded
+  `appDir: /Users/ah/Documents/ai-project-dashboard` (84 files referenced it). A dev server started
+  *after* the move ran against that cache and pegged a full CPU core, pushing an endless
+  rebuild/reload to the browser — ~10 reloads/second, looking exactly like an app bug. `rm -rf .next`
+  + restart fixed it outright; the fresh manifest then recorded the new path.
+- **Takeaway:** after moving or renaming a project directory, delete the build cache (`.next`,
+  `dist`, `.turbo`, `.vite`) and restart long-lived dev processes before debugging anything else.
+  Check the cache's own recorded root first — it's a one-line `grep` that can save an afternoon.
+
+## Separate "who is looping" from "what is looping" before believing a mechanism
+For a runaway loop, first establish which side drives it. The wrong half wastes the whole
+investigation — and a plausible, well-cited mechanism can still be the wrong one.
+- **Why it came up:** the obvious theory was a write→watch→recompile feedback loop (the SQLite DB
+  does sit inside the watched tree). Direct measurement killed it: rendering left the DB's `-wal`
+  and `-shm` mtimes untouched, and **zero files changed anywhere in the tree** during the loop. The
+  decisive step was removing the client — with no browser attached the server sat at **0.0% CPU and
+  zero requests**, proving it never self-drove. Profiling the process (`sample <pid>`) then put the
+  hot stack squarely inside Turbopack's native binary next to a `notify-rs fsevents` thread, which
+  pointed at the cache, not the app.
+- **Takeaway:** for any runaway, run the two-sided test before theorising: detach the client and
+  measure the server idle; then profile the busy process rather than reasoning about which code
+  *could* be hot. "No files changed" refutes a watcher-loop hypothesis outright, however plausible
+  its code trace looks.
