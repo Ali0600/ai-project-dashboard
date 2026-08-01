@@ -195,7 +195,7 @@ function migrate(db: Database.Database): void {
  * Idempotent: rows already `lost` are re-checked cheaply and phantom rows are gone after the first
  * pass. A `lost` row whose file reappears is restored to `needs_scan` so it can still be captured.
  */
-function reconcileMissingTranscripts(db: Database.Database): void {
+export function reconcileMissingTranscripts(db: Database.Database): void {
   const rows = db
     .prepare(
       `SELECT c.id, c.transcript_path, c.scan_status, c.last_scanned_at, c.last_activity_at,
@@ -213,26 +213,38 @@ function reconcileMissingTranscripts(db: Database.Database): void {
   }[];
   if (rows.length === 0) return;
 
-  const markLost = db.prepare("UPDATE conversations SET scan_status = 'lost' WHERE id = ?");
-  const unmarkLost = db.prepare("UPDATE conversations SET scan_status = 'needs_scan' WHERE id = ?");
-  const remove = db.prepare("DELETE FROM conversations WHERE id = ?");
+  // Decide everything FIRST, then open a transaction only if there is something to write. This runs
+  // on every getDb(), which in dev is every recompile (module state resets), and the DB lives inside
+  // the directory the dev server watches — so an unconditional write here is a foot-gun that can
+  // feed the file-watcher. Deciding first also keeps the transaction off the fs.existsSync calls.
+  const unmarkLost: number[] = [];
+  const remove: number[] = [];
+  const markLost: number[] = [];
+
+  for (const c of rows) {
+    if (fs.existsSync(c.transcript_path)) {
+      // A previously-lost transcript is back (restored, or the path was wrong) — let it be scanned.
+      if (c.scan_status === "lost") unmarkLost.push(c.id);
+      continue;
+    }
+    if (c.last_scanned_at != null || c.item_count > 0) continue; // captured something already
+    // "Missing already, but flagged within the last few days" can only mean the transcript was
+    // never written — real transcripts survive far longer than this before being pruned.
+    const activityMs = c.last_activity_at ? Date.parse(c.last_activity_at) : NaN;
+    const phantom = Number.isFinite(activityMs) && Date.now() - activityMs < PHANTOM_MAX_AGE_MS;
+    if (phantom) remove.push(c.id);
+    else if (c.scan_status !== "lost") markLost.push(c.id);
+  }
+
+  if (unmarkLost.length === 0 && remove.length === 0 && markLost.length === 0) return;
+
+  const unmarkStmt = db.prepare("UPDATE conversations SET scan_status = 'needs_scan' WHERE id = ?");
+  const removeStmt = db.prepare("DELETE FROM conversations WHERE id = ?");
+  const markStmt = db.prepare("UPDATE conversations SET scan_status = 'lost' WHERE id = ?");
 
   db.transaction(() => {
-    for (const c of rows) {
-      const exists = fs.existsSync(c.transcript_path);
-      if (exists) {
-        // A previously-lost transcript is back (restored, or the path was wrong) — let it be scanned.
-        if (c.scan_status === "lost") unmarkLost.run(c.id);
-        continue;
-      }
-      if (c.last_scanned_at != null || c.item_count > 0) continue; // captured something already
-      // "Missing already, but flagged within the last few days" can only mean the transcript was
-      // never written — real transcripts survive far longer than this before being pruned.
-      const activityMs = c.last_activity_at ? Date.parse(c.last_activity_at) : NaN;
-      const phantom =
-        Number.isFinite(activityMs) && Date.now() - activityMs < PHANTOM_MAX_AGE_MS;
-      if (phantom) remove.run(c.id);
-      else if (c.scan_status !== "lost") markLost.run(c.id);
-    }
+    for (const id of unmarkLost) unmarkStmt.run(id);
+    for (const id of remove) removeStmt.run(id);
+    for (const id of markLost) markStmt.run(id);
   })();
 }
