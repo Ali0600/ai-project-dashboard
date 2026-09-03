@@ -167,3 +167,30 @@ docker run -p 127.0.0.1:3000:3000 -v "$PWD/data:/app/data" ai-project-dashboard
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · SQLite (better-sqlite3) ·
 dnd-kit · zod · Vitest · GitHub Actions CI · Claude Code (headless `claude -p`).
+
+## Experience Gained
+
+- Built an event-driven capture pipeline on Claude Code hooks: a `SessionEnd` hook flags
+  conversation transcripts for ingestion at no LLM cost, and a headless extraction stage
+  (`claude -p`, no API key) turns append-only JSONL transcripts into zod-validated structured
+  data with retry/repair for malformed model output.
+- Designed a full-stack TypeScript application - Next.js App Router, React 19, SQLite via
+  better-sqlite3 in WAL mode - with a drag-and-drop Kanban board, incremental scanning on per-
+  conversation checkpoints, and idempotent de-duplication and tombstoning enforced by a
+  `UNIQUE(project, kind, norm_key)` constraint.
+- Shipped schema changes as guarded, idempotent SQLite column migrations over a live database,
+  including AI-triaged task priorities that sort the board highest-first.
+- Sandboxed every agentic action: "Implement" resumes a task's source conversation read-only
+  with edit and shell tools disabled; "Apply on a branch" runs edits inside an isolated `git
+  worktree` on a dedicated branch with shell and network disabled, the diff committed for review
+  and never pushed.
+- Integrated an external dependency scanner as a keyless service with a 24-hour SQLite-cached
+  report per project, and a web-research stage that mines requested features and produces
+  sourced fix writeups for recurring failures, each claim traceable to a link.
+- Containerized with a multi-stage Dockerfile (Next.js standalone output) and a persisted SQLite
+  volume, binding the unauthenticated UI to `127.0.0.1` by design in both the container and the
+  dev server.
+- Wrote an idempotent installer that merges a hook into `~/.claude/settings.json`, installs a
+  slash command and updates a global `CLAUDE.md` while preserving existing configuration; 62
+  Vitest cases cover the transcript parser, store, database, plan-file and Claude layers, gated
+  by GitHub Actions running typecheck, lint, test and build on every push.
