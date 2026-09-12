@@ -3,67 +3,74 @@
 [![CI](https://github.com/Ali0600/ai-project-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Ali0600/ai-project-dashboard/actions/workflows/ci.yml)
 
 Turn your Claude Code conversations into a visual project workspace. The dashboard scans
-your local conversation transcripts and surfaces, per project, a **Kanban task board** plus
-**Suggestions**, **Research** (web-sourced feature ideas) and **Failures** — so the ideas,
-to‑dos and broken things that normally scroll away in chat don't get lost.
+your local conversation transcripts. For each project it shows a **Kanban task board** plus
+**Suggestions**, **Research** (feature ideas found on the web) and **Failures**. So the ideas,
+to‑dos and broken things that normally scroll away in chat no longer get lost.
 
 - **Extraction is done by Claude itself** — no separate API key. A live `/sync-board` slash
-  command uses your current session; backfill and the dashboard's "Scan" button use headless
-  Claude Code (`claude -p`), reusing your existing login.
+  command uses your current session. Backfill and the dashboard's "Scan" button use headless
+  Claude Code (`claude -p`), which reuses your existing login.
 - **Opt-in capture** — a folder becomes a project when you run `/sync-board` in it (or
-  `npm run backfill`). After that, a `SessionEnd` hook plus live transcript-mtime detection flag new
-  activity in **already-tracked** projects as "needs scan" — so random one-off sessions (e.g. in
-  `/tmp`) never auto-create projects. The overview lists projects with captured items and tucks
-  empty/awaiting-scan folders into a collapsible group.
+  `npm run backfill`). After that, a `SessionEnd` hook plus live transcript-mtime detection flag
+  new activity in **already-tracked** projects as "needs scan". So random one-off sessions (for
+  example in `/tmp`) never auto-create projects. The overview lists projects with captured
+  items. It tucks empty or awaiting-scan folders into a collapsible group.
 - **Completion tracking** — re-scans flag tasks that look finished ("Looks done?") for you to
-  confirm (fuzzy-matched, so reworded mentions still count); a **Full rescan** re-checks completions
-  across all past content. You can also drag cards across the board.
-- **Act on tasks** — set Urgent/High/Medium/Low priority, add tasks manually, open a detail view,
-  **Promote** a suggestion onto the board, **Dismiss** items (restorable from a Dismissed section),
-  copy a task or plan to the clipboard, and hit **Implement** to draft a read-only plan by resuming
-  the task's source chat. Scans stream **live step-by-step progress**.
+  confirm. Matching is fuzzy, so reworded mentions still count. A **Full rescan** re-checks
+  completions across all past content. You can also drag cards across the board.
+- **Act on tasks** — set Urgent/High/Medium/Low priority, add tasks by hand, open a detail view,
+  **Promote** a suggestion onto the board, **Dismiss** items (restore them from a Dismissed
+  section), copy a task or plan to the clipboard, and hit **Implement** to draft a read-only
+  plan by resuming the task's source chat. Scans stream **live step-by-step progress**.
 - **Failures tab** — things that broke and *stayed* broken (rate limits, failed builds, bad API
-  responses) are captured as their own kind, not lost in the chat scrollback. Each one counts how
-  many scans it has recurred in (`seen 3×`) and sorts by that, because the thing that keeps
-  happening is the thing worth fixing. **"How do I fix this?"** runs a web-search agent on that
-  specific error and stores a sourced remediation writeup — what it means, the likely cause, the
-  fix, how to verify, and a durable mitigation, each claim traceable to a link. **Create fix task**
-  puts the work on the board while the failure stays put, so a recurrence during the fix still
-  counts. Recurring failures also surface in the overview's "Needs you" list.
+  responses) are captured as their own kind. They are not lost in the chat scrollback. Each one
+  counts how many scans it has recurred in (`seen 3×`) and sorts by that count, because the
+  thing that keeps happening is the thing worth fixing. **"How do I fix this?"** runs a
+  web-search agent on that specific error. It stores a sourced fix writeup: what the error
+  means, the likely cause, the fix, how to verify it, and a lasting mitigation. Each claim links
+  to its source. **Create fix task** puts the work on the board while the failure stays put, so
+  a recurrence during the fix still counts. Recurring failures also show up in the overview's
+  "Needs you" list.
 
 ![AI Project Dashboard — per-project Kanban board with AI-assigned priorities](docs/screenshot.png)
 
 ## Highlights
 
-- Built an **event-driven capture pipeline** using Claude Code **hooks** to flag conversation
-  transcripts for ingestion automatically on session end.
-- Integrated a **headless LLM extraction stage** (`claude -p`, no API key) that turns raw JSONL
-  transcripts into **zod-validated structured data**, with retry/repair for malformed model JSON.
+- Built an **event-driven capture pipeline** on Claude Code **hooks**. It flags conversation
+  transcripts for ingestion automatically when a session ends.
+- Added a **headless LLM extraction stage** (`claude -p`, no API key). It turns raw JSONL
+  transcripts into **zod-validated structured data**, with retry and repair for malformed model
+  JSON.
 - Designed a **full-stack TypeScript** app — **Next.js (App Router) + SQLite (better-sqlite3, WAL)**
   — with an interactive **drag-and-drop Kanban** board (`dnd-kit`).
 - Implemented **incremental scanning** (per-conversation UUID checkpoints) and **idempotent
-  de-duplication / tombstoning** via a `UNIQUE(project, kind, norm_key)` constraint.
-- Authored an **idempotent installer** that safely merges a hook into `~/.claude/settings.json`,
-  installs a slash command, and updates `CLAUDE.md` — preserving existing config.
-- **Containerized** with a multi-stage Dockerfile (Next.js standalone output) and a persisted
+  de-duplication / tombstoning** (idempotent: safe to run twice) through a
+  `UNIQUE(project, kind, norm_key)` constraint.
+- Wrote an **idempotent installer** that safely merges a hook into `~/.claude/settings.json`,
+  installs a slash command, and updates `CLAUDE.md` — while keeping your existing config.
+- **Containerized** it with a multi-stage Dockerfile (Next.js standalone output) and a persisted
   SQLite volume.
-- **AI-triaged priorities** — tasks are auto-assigned Urgent/High/Medium/Low and the board sorts
-  highest-first; shipped behind a guarded, idempotent SQLite column migration over a live DB.
-- **Agentic "Implement"** — drafts an implementation plan by resuming a task's *source* conversation
-  (`claude -p --resume`) read-only (edit/shell tools disabled), so the plan has full context.
+- **AI-triaged priorities** — tasks get Urgent/High/Medium/Low automatically, and the board sorts
+  highest-first. This shipped behind a guarded, idempotent SQLite column migration over a live DB.
+- **Agentic "Implement"** — drafts an implementation plan by resuming a task's *source*
+  conversation (`claude -p --resume`) read-only (edit and shell tools disabled), so the plan has
+  full context.
 - **"Apply on a branch"** — runs the agent with edits enabled but **sandboxed**: an isolated
-  `git worktree` + `dashboard/apply-*` branch, `acceptEdits` with shell/network disabled, the diff
-  captured and committed for review. The main checkout is never touched and nothing is pushed.
+  `git worktree` (a second checkout of the repo) plus a `dashboard/apply-*` branch, `acceptEdits`
+  with shell and network disabled. The diff is captured and committed for review. The main
+  checkout is never touched and nothing is pushed.
 - **"Use Internet for Research"** — a headless `claude -p` with **WebSearch/WebFetch enabled**
-  (edit/shell disabled) mines Reddit, forums, and the wider web for features people are *requesting*
-  for projects like yours, then ingests them as deduped, source-linked ideas in a **Research** tab.
-- **Dependency-health badges** — integrates an external [Preflight](https://preflight-web.vercel.app)
-  scanner *as a service* (keyless `POST /api/scan`): reads each project's local manifest, caches the
-  `Report` in SQLite (24h TTL), and surfaces it via a **"Scan deps"** panel on the project page
-  (CVE/malware counts + flagged findings) — Preflight stays the single source, so its improvements
-  appear with zero dashboard changes.
-- **Tested & CI-gated** — Vitest unit tests for the streaming transcript parser; GitHub Actions runs
-  typecheck · lint · test · build on every push.
+  (edit and shell disabled) mines Reddit, forums, and the wider web for features people are
+  *asking for* in projects like yours. It then ingests them as deduped, source-linked ideas in a
+  **Research** tab.
+- **Dependency-health badges** — uses an external [Preflight](https://preflight-web.vercel.app)
+  scanner *as a service* (keyless `POST /api/scan`). It reads each project's local manifest,
+  caches the `Report` in SQLite (24h TTL), and shows it in a **"Scan deps"** panel on the project
+  page (CVE/malware counts plus flagged findings). Preflight stays the single source, so its
+  improvements appear with zero dashboard changes.
+- **Tested & CI-gated** — Vitest unit tests cover the streaming transcript parser, store,
+  database, plan-file and Claude layers. GitHub Actions runs typecheck · lint · test · build on
+  every push.
 
 ## How it works
 
@@ -87,13 +94,13 @@ Data source: Claude Code stores each conversation as append-only JSONL at
 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. The parser strips tool noise and keeps
 the user/assistant text.
 
-**Plan-file backlog capture.** When a conversation references a plan-mode document
-(`~/.claude/plans/<slug>.md`), the scan also folds that plan's **Backlog** section into extraction
-(those edits are made via tools the transcript parser strips, so they're otherwise invisible). To
-avoid noise from the design/“done” parts of a plan, only a clearly delimited backlog is read — wrap
-it in `<!-- backlog:start -->` … `<!-- backlog:end -->`, or use a `## Backlog` heading (also
-matched: “Not built”, “Open items”, “Remaining”, “TODO”). A plan without one contributes nothing.
-Disable with `SCAN_PLAN_FILES=0`.
+**Plan-file backlog capture.** A conversation may reference a plan-mode document
+(`~/.claude/plans/<slug>.md`). When it does, the scan also folds that plan's **Backlog** section
+into extraction. Those edits happen through tools the transcript parser strips, so they are
+otherwise invisible. To avoid noise from the design or “done” parts of a plan, only a clearly
+marked backlog is read. Wrap it in `<!-- backlog:start -->` … `<!-- backlog:end -->`, or use a
+`## Backlog` heading (also matched: “Not built”, “Open items”, “Remaining”, “TODO”). A plan
+without one contributes nothing. Disable this with `SCAN_PLAN_FILES=0`.
 
 ## Getting started
 
@@ -113,7 +120,7 @@ npm run install-hooks           # merges into ~/.claude (use --dry-run to previe
 ```
 
 This adds a `SessionEnd` hook, installs the `/sync-board` slash command, and appends a nudge
-block to your global `CLAUDE.md`. Re-running it is safe (idempotent).
+block to your global `CLAUDE.md`. It is safe to run again (idempotent).
 
 ## Scripts
 
@@ -155,13 +162,14 @@ docker build -t ai-project-dashboard .
 docker run -p 127.0.0.1:3000:3000 -v "$PWD/data:/app/data" ai-project-dashboard
 ```
 
-> The published port is bound to `127.0.0.1` deliberately. This dashboard has no authentication and
-> its API can delete projects and start edit-enabled Claude runs against your local repos, so it
-> should never be reachable from the network. `npm run dev` / `npm start` bind `127.0.0.1` for the
+> The published port is bound to `127.0.0.1` on purpose. This dashboard has no authentication.
+> Its API can delete projects and start edit-enabled Claude runs against your local repos. So it
+> must never be reachable from the network. `npm run dev` / `npm start` bind `127.0.0.1` for the
 > same reason (Next's own default is `0.0.0.0`).
 
 > The container serves the UI and manual board use. Automatic capture (hooks) and headless
-> scanning need the host's `claude` CLI and `~/.claude` data, so run `backfill`/hooks on the host.
+> scanning need the host's `claude` CLI and `~/.claude` data. So run `backfill` and hooks on the
+> host.
 
 ## Tech stack
 
@@ -170,27 +178,17 @@ dnd-kit · zod · Vitest · GitHub Actions CI · Claude Code (headless `claude -
 
 ## Experience Gained
 
-- Built an event-driven capture pipeline on Claude Code hooks: a `SessionEnd` hook flags
-  conversation transcripts for ingestion at no LLM cost, and a headless extraction stage
-  (`claude -p`, no API key) turns append-only JSONL transcripts into zod-validated structured
-  data with retry/repair for malformed model output.
-- Designed a full-stack TypeScript application - Next.js App Router, React 19, SQLite via
-  better-sqlite3 in WAL mode - with a drag-and-drop Kanban board, incremental scanning on per-
-  conversation checkpoints, and idempotent de-duplication and tombstoning enforced by a
-  `UNIQUE(project, kind, norm_key)` constraint.
-- Shipped schema changes as guarded, idempotent SQLite column migrations over a live database,
-  including AI-triaged task priorities that sort the board highest-first.
-- Sandboxed every agentic action: "Implement" resumes a task's source conversation read-only
-  with edit and shell tools disabled; "Apply on a branch" runs edits inside an isolated `git
-  worktree` on a dedicated branch with shell and network disabled, the diff committed for review
-  and never pushed.
-- Integrated an external dependency scanner as a keyless service with a 24-hour SQLite-cached
-  report per project, and a web-research stage that mines requested features and produces
-  sourced fix writeups for recurring failures, each claim traceable to a link.
+- Built a capture pipeline on Claude Code hooks: a `SessionEnd` hook flags transcripts at 0 LLM
+  cost; a headless `claude -p` stage (no API key) turns JSONL into zod-checked data with repair.
+- Designed a full-stack TypeScript app on Next.js 16, React 19 and better-sqlite3 (WAL) with a
+  drag-and-drop Kanban, scan checkpoints and `UNIQUE(project, kind, norm_key)` dedup/tombstoning.
+- Shipped guarded, idempotent SQLite column migrations over a live database, including AI-triaged
+  task priorities on 4 levels (Urgent/High/Medium/Low) that sort the board highest-first.
+- Sandboxed 2 agentic paths: "Implement" reopens a task's source chat with edit and shell tools
+  off; "Apply on a branch" edits in an isolated `git worktree`, no shell or network, not pushed.
+- Integrated a keyless dependency scanner with a 24-hour SQLite-cached report per project, and a
+  web-research stage that mines requested features and writes sourced fixes for repeat failures.
 - Containerized with a multi-stage Dockerfile (Next.js standalone output) and a persisted SQLite
-  volume, binding the unauthenticated UI to `127.0.0.1` by design in both the container and the
-  dev server.
-- Wrote an idempotent installer that merges a hook into `~/.claude/settings.json`, installs a
-  slash command and updates a global `CLAUDE.md` while preserving existing configuration; 62
-  Vitest cases cover the transcript parser, store, database, plan-file and Claude layers, gated
-  by GitHub Actions running typecheck, lint, test and build on every push.
+  volume, binding the unauthenticated UI to `127.0.0.1` in both the container and the dev server.
+- Wrote an idempotent installer for a hook in `~/.claude/settings.json`, a slash command and a
+  `CLAUDE.md` block, keeping existing config; 62 Vitest cases and CI gate every push.
